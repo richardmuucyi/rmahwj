@@ -1,6 +1,6 @@
 {
   "name": "session-board",
-  "version": "0.30.1",
+  "version": "0.31.1",
   "description": "Strip above the prompt: other sessions that need you or are done; this session's task bar, subagent models and files while it works, and a ◈ chip that counts its background jobs, agents, monitors and wake-ups apart (a lone job opens the strip, and a wide pane gives the oldest task's time beside its kind); /sessions lists each one under BACKGROUND with how long it has run; a recap when Claude flags a check or assumptions wait. A yellow ⚠ chip in the others group names a file this session and another live session both edited with Claude's own tools and that is still uncommitted; the Files tab marks it with also: and the other session. Card files of sessions untouched for 7 days are deleted at session start. /sessions has Sessions, Turns, Files and Context tabs. Context guard: from 200K an Actions menu (the context size itself is in the usage gauge's context meter) and, from 300K, advice, with picks that TYPE into the prompt box and never run anything: Compact… (a picker of what to keep), Plain compact (/compact) and Clear (/clear). You read the command, change it if you like, and press Enter. A /compact you press Enter on is never changed; the engine's own late compaction is told to keep paths, ids and rules. Each turn end from 200K adds one line (context, grade, whether the buttons were on offer, the saving) to ~/.claude/session-board/guard/, apart from the journal's log folder. The Context tab shows today's count from it. Facts from events and git status; Claude's one-line turn summary is the only token cost, and a compaction costs what any compaction costs.",
   "author": {
     "name": "Richard"
@@ -10,8 +10,14 @@
     "journal": {
       "type": "boolean",
       "title": "Journal log",
-      "description": "Keep a daily log of Claude's turns for a journal wrap-up to read, and show a 📓 button on turn cards. Needs a journal skill that reads ~/.claude/session-board/log.",
+      "description": "Keep a markdown day journal of Claude's turns: what was done in each project and its status, what to check, reflections from the day's numbers and lessons Claude noted. One page per day for every session, at <journal folder>/YYYY/MM/YYYY-MM-DD.md; the page is rebuilt after each turn, written whole (a temp file moved over it), and at session start for any logged day whose page is missing, out of date or cut short; it keeps your lines under \"## My notes\"; if you edit anything else, the edited page is saved beside it as YYYY-MM-DD.edited-HHMMSS.md. Also keeps the JSONL log in ~/.claude/session-board/log for a journal skill, and shows a 📓 button on turn cards.",
       "default": false
+    },
+    "journalDir": {
+      "type": "string",
+      "title": "Journal folder",
+      "description": "Where the day journal goes. Empty: ~/.claude/session-board/journal. A leading ~, or a relative folder, starts at your home folder.",
+      "default": ""
     },
     "mode": {
       "type": "string",

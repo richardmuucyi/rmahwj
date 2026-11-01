@@ -25,6 +25,8 @@ import {
 } from './guard-glue'
 import type { GuardIo } from './guard-glue'
 import { short, same, barCells, pad2, clockTime, FIRST_COL, LABEL_BG, LABEL_FG, LINK } from './shared'
+import { editedOutsideNotes, isStale, journalPath, journalRoot, keptNotes, parseLog, renderJournal, tickedChecks } from './journal'
+import type { JournalLine } from './journal'
 import type { Kit } from './shared'
 
 // Reads only what each session is already doing (prompts, tool calls, turn
@@ -962,6 +964,13 @@ When you used tools in a turn, end your final reply with one line in exactly thi
 Turn: <what you did, under 15 words>
 If there is one thing the user should verify, add it to that line: "Turn: <what you did> · check: <what to verify, under 10 words>". Leave the line out of replies that used no tools.`
 
+/** With the journal on, Claude may add a lesson for the day page; with it off, the guidance stays as short as before. */
+const LESSON_GUIDANCE = `If the turn taught something worth keeping (a cause found, a trap, a better way), add it to the same line too: "· lesson: <under 15 words>". Most turns have no lesson.`
+
+function turnGuidance(): string {
+  return isJournal ? `${TURN_GUIDANCE}\n${LESSON_GUIDANCE}` : TURN_GUIDANCE
+}
+
 const MAX_TURNS = 20
 let sessionStartedAt = 0
 /** Newest first; the first is the running turn, or the last one. */
@@ -978,14 +987,18 @@ function toolKind(tool: string, args: Record<string, unknown>): ToolKind | undef
   return 'other'
 }
 
-/** Claude's "Turn: … · check: …" line, the last one in its answer. */
-function parseSummary(answer: string): { summary?: string; check?: string } {
+/** Claude's "Turn: … · check: … · lesson: …" line, the last one in its answer. Check and lesson come in either order. */
+function parseSummary(answer: string): { summary?: string; check?: string; lesson?: string } {
   const lines = answer.split('\n').map(l => l.trim()).filter(l => /^[*_]*turn[*_]*\s*:/i.test(l))
   const line = lines[lines.length - 1]
   if (!line) return {}
   const body = line.replace(/^[*_]*turn[*_]*\s*:[*_]*\s*/i, '').replace(/[*_]+$/, '').trim()
-  const [what, check] = body.split(/\s*[·|•]\s*check\s*:\s*/i)
-  return { summary: what?.trim() || undefined, check: check?.replace(/[*_.]+$/, '').trim() || undefined }
+  const [what, ...parts] = body.split(/\s*[·|•]\s*(?=(?:check|lesson)\s*:)/i)
+  const field = (name: 'check' | 'lesson') => {
+    const p = parts.find(x => x.toLowerCase().startsWith(name))
+    return p?.replace(/^\w+\s*:\s*/, '').replace(/[*_.]+$/, '').trim() || undefined
+  }
+  return { summary: what?.trim() || undefined, check: field('check'), lesson: field('lesson') }
 }
 
 /** The running (or last) turn, refreshed from what the session tracks now. */
@@ -1020,8 +1033,10 @@ function noteTurnTool(tool: string, args: Record<string, unknown>): void {
   turnRecs[0] = { ...cur, tools: { ...cur.tools, [kind]: (cur.tools[kind] ?? 0) + 1 }, toolTotal: cur.toolTotal + 1 }
 }
 
-/** The `journal` setting: off by default, for anyone without a journal skill to read the log. */
+/** The `journal` setting: off by default. On, it keeps the JSONL log and the markdown day journal. */
 let isJournal = false
+/** Where the markdown day journal goes: `<root>/YYYY/MM/YYYY-MM-DD.md`. Set at session.start. */
+let journalDir = ''
 const LOG_KEEP_DAYS = 30
 
 /**
@@ -1079,7 +1094,8 @@ async function pruneCards($: EngineInterface): Promise<void> {
 
 /**
  * The daily journal log: one line per turn that used tools, for the journal's
- * wrap-up to read. Outside the vault; no prompt text and no file names. One
+ * wrap-up to read. Outside the vault; no prompt text and no file paths from
+ * the turn's records, but Claude's own summary may name a file. One
  * file per session per day, so sessions never write the same file.
  */
 function logTurn($: EngineInterface, r: TurnRecord): void {
@@ -1093,6 +1109,7 @@ function logTurn($: EngineInterface, r: TurnRecord): void {
     project: me.project,
     did: r.summary ?? null,
     check: r.check,
+    lesson: r.lesson,
     mins: Math.max(1, Math.round(((r.endedAt ?? r.startedAt) - r.startedAt) / 60_000)),
     files: f.added + f.modified + f.deleted + f.renamed,
     assumed: r.assumptions.length,
@@ -1106,8 +1123,90 @@ function logTurn($: EngineInterface, r: TurnRecord): void {
       if (i >= 0) turnRecs[i] = { ...turnRecs[i]!, logged: true }
       publishTurns($)
       await countToday($)
+      await writeJournal($, day)
     })
     .catch(() => undefined)
+}
+
+/**
+ * The markdown day journal, rebuilt from every session's JSONL of that day.
+ * Each session writes only its own JSONL, so a rebuild never loses a line for
+ * good: two rebuilds at once can leave one turn out until the next rebuild.
+ * Whatever the old page holds under "## My notes" is kept.
+ */
+async function writeJournal($: EngineInterface, day: string, read?: Map<string, JournalLine[]>): Promise<void> {
+  if (!isJournal || dir === '' || journalDir === '') return
+  const sessions = read ?? (await readDay($, day))
+  if (sessions.size === 0) return
+  const path = journalPath(journalDir, day)
+  const old = await $.fs.read(path).catch(() => '')
+  const page = renderJournal(day, sessions, keptNotes(old), tickedChecks(old))
+  if (page === old) return
+  // Text written outside "## My notes" would be lost: keep the edited page beside the new one.
+  if (editedOutsideNotes(old)) {
+    const d = new Date(await $.clock.now())
+    const stamp = `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+    await $.fs.write(`${path.slice(0, -'.md'.length)}.edited-${stamp}.md`, old)
+  }
+  await writeWhole($, path, page)
+}
+
+/**
+ * Writes a file so that a crash leaves either the old text or the new, never
+ * half of it: the text goes to `<path>.tmp` first, then the host's own move
+ * renames it over the file (the file API has no rename). On one disk that
+ * rename is atomic. If the move fails, the file is written in place, as
+ * before, and the temp file is removed.
+ */
+async function writeWhole($: EngineInterface, path: string, text: string): Promise<void> {
+  const tmp = `${path}.tmp`
+  await $.fs.write(tmp, text)
+  const isWindows = /^[A-Za-z]:/.test(path)
+  const win = (p: string) => p.replace(/\//g, '\\')
+  const moved = await $.process
+    .run(isWindows ? ['cmd', '/c', 'move', '/y', win(tmp), win(path)] : ['mv', '-f', '--', tmp, path], { timeoutMs: 10_000 })
+    .then(r => r.exitCode === 0)
+    .catch(() => false)
+  if (moved) return
+  await $.fs.write(path, text)
+  const argv = isWindows ? ['cmd', '/c', 'del', '/f', '/q', win(tmp)] : ['rm', '-f', '--', tmp]
+  await $.process.run(argv, { timeoutMs: 10_000 }).catch(() => undefined)
+}
+
+/** Every session's logged turns of one day, by session id. */
+async function readDay($: EngineInterface, day: string): Promise<Map<string, JournalLine[]>> {
+  const logDay = `${dir}/log/${day}`
+  const names = (await $.fs.list(logDay).catch(() => []))
+    .filter(f => f.kind === 'file' && f.name.endsWith('.jsonl'))
+    .map(f => f.name)
+    .sort()
+  const sessions = new Map<string, JournalLine[]>()
+  for (const name of names) {
+    const lines = parseLog(await $.fs.read(`${logDay}/${name}`).catch(() => ''))
+    if (lines.length > 0) sessions.set(name.slice(0, -'.jsonl'.length), lines)
+  }
+  return sessions
+}
+
+/**
+ * At session start: rebuilds the page of every day still in the log (the last
+ * LOG_KEEP_DAYS) that has no page, a page that counts fewer or more turns than
+ * the log holds, or a page cut short. A page that is up to date is left alone,
+ * so an edit you made to a past day is not undone when nothing new came in.
+ */
+async function healJournal($: EngineInterface): Promise<void> {
+  if (!isJournal || dir === '' || journalDir === '') return
+  const days = (await $.fs.list(`${dir}/log`).catch(() => []))
+    .filter(f => f.kind === 'dir' && /^\d{4}-\d{2}-\d{2}$/.test(f.name))
+    .map(f => f.name)
+    .sort()
+  for (const day of days) {
+    const sessions = await readDay($, day)
+    const turns = [...sessions.values()].reduce((n, l) => n + l.length, 0)
+    if (turns === 0) continue
+    const old = await $.fs.read(journalPath(journalDir, day)).catch(() => '')
+    if (isStale(old, turns)) await writeJournal($, day, sessions)
+  }
 }
 
 /** Lines in today's journal log, every session's: the Turns tab's 📓 count. */
@@ -2062,6 +2161,7 @@ export const register: Register = (on, options) => {
     const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || ''
     if (home === '') return next(e) // nowhere shared to write: stay out of the way
     dir = `${home.replace(/[\\/]$/, '')}/.claude/session-board`
+    journalDir = journalRoot(options.journalDir, home, dir)
     const root = await $.session.root()
     sessionRoot = root
     resetLive($)
@@ -2125,6 +2225,8 @@ export const register: Register = (on, options) => {
     void pruneCards($).catch(() => undefined)
     void pruneGuardLogs(guardIo($)).catch(() => undefined)
     void countToday($).catch(() => undefined)
+    // in the same queue as the turn lines, so this session never rebuilds a page twice at once
+    writing = writing.then(() => healJournal($)).catch(() => undefined)
     await $.command.register({ name: 'sessions', description: 'Show all Claude Code sessions, this folder first' }).catch(() => undefined)
     void loadInstructions(guardIo($)).then(() => refreshGuard(guardIo($))).catch(() => undefined)
 
@@ -2230,7 +2332,7 @@ export const register: Register = (on, options) => {
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     return {
-      sections: [...composed.sections, { id: 'session-board:turn-summary', text: TURN_GUIDANCE, scope: 'session' as const }],
+      sections: [...composed.sections, { id: 'session-board:turn-summary', text: turnGuidance(), scope: 'session' as const }],
     }
   })
 

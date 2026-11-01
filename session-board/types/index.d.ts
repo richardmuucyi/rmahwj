@@ -98,6 +98,8 @@ export type TurnRecord = {
   /** Claude's own one-line summary ("Turn: …"), and what it asks you to verify ("· check: …"). */
   summary?: string
   check?: string
+  /** What the turn taught ("· lesson: …"), for the day journal; asked for only with the journal setting on. */
+  lesson?: string
   files: { added: number; modified: number; deleted: number; renamed: number; top: FileRow[] }
   tools: Partial<Record<ToolKind, number>>
   toolTotal: number

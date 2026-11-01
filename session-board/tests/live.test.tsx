@@ -2,6 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { parseLog, renderJournal } from '../hooks/journal'
+
 /** On Windows the engine turns /home/me/x into C:\home\me\x. The tests keep POSIX paths, so a test reads the same on both. */
 const posix = (p: string) => p.replace(/^[A-Za-z]:/, '').replace(/\\/g, '/')
 
@@ -23,7 +25,7 @@ const BAND = {
 }
 
 /** A git repository in memory: what status, numstat and diff answer. */
-type Repo = { isRepo: boolean; status: string[]; numstat: string[]; runs: string[][]; logDirs?: string[]; mtimes?: Record<string, number> }
+type Repo = { isRepo: boolean; status: string[]; numstat: string[]; runs: string[][]; logDirs?: string[]; mtimes?: Record<string, number>; noMove?: boolean }
 
 const openSawView: string[] = []
 
@@ -96,6 +98,19 @@ function bottom(on: On, files: Map<string, string>, repo: Repo) {
     const argv = [...e.argv]
     repo.runs.push(argv)
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // the host's move (mv, or cmd's move on Windows) renames in the in-memory disk; noMove makes it fail
+    const mv = argv[0] === 'mv' ? argv.slice(-2) : argv[0] === 'cmd' && argv[2] === 'move' ? argv.slice(-2) : undefined
+    if (mv) {
+      const [from, to] = mv.map(posix) as [string, string]
+      if (repo.noMove || !files.has(from)) return out('', 1)
+      files.set(to, files.get(from)!)
+      files.delete(from)
+      return out('')
+    }
+    if (argv[0] === 'rm' && argv[1] === '-f') {
+      for (const p of argv.slice(3)) files.delete(posix(p))
+      return out('')
+    }
     if (!repo.isRepo) return out('', 128)
     const args = argv.filter(a => a !== '-c' && a !== 'core.quotepath=off').slice(1)
     if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return out('/home/me/vault\n')
@@ -767,6 +782,158 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     const removed = repo.runs.filter(r => r[0] === 'rm')
     expect(removed).toEqual([['rm', '-rf', '--', '/home/me/.claude/session-board/log/2026-08-01']])
+  })
+
+  /** One turn that used a tool and ended with the given answer. */
+  const toolTurn = async ($: Engine, clock: { advance(ms: number): Promise<void> }, id: string, answer: string, ms = 60_000) => {
+    await $.prompt.submit({ text: 'secret prompt text', origin: { kind: 'composer' }, wait: false })
+    await $.turn.start({ text: 'secret prompt text', turnId: id })
+    await step($, { turnId: id, index: 0, model: 'claude-opus-4-1-20250805' })
+    await $.tool.call({ tool: 'Read', file_path: '/home/me/vault/a.ts' })
+    await clock.advance(ms)
+    await $.turn.complete({ answer, durationMs: ms, isAborted: false, turnId: id, reason: 'answer' })
+    await clock.advance(1_000)
+  }
+
+  test(`journal on: one markdown page per day from every session's log, lesson asked for, notes kept (${surface})`, { options: { journal: true } }, async ($, on) => {
+    const clock = mock.clock(on, { now: Date.parse('2026-10-12T09:00:00') })
+    const files = new Map<string, string>()
+    const repo: Repo = { isRepo: false, status: [], numstat: [], runs: [] }
+    bottom(on, files, repo)
+    on('prompt.compose', () => ({ sections: [] }))
+    on('tool.call', () => ({ result: 'ok' }))
+    // another session logged earlier the same day, in another project
+    files.set('/home/me/.claude/session-board/log/2026-10-12/other.jsonl',
+      `${JSON.stringify({ at: '08:30', project: 'iams-ups', did: 'Fixed the deploy script', check: 'staging URL', mins: 4, files: 2, assumed: 0, status: 'answered' })}\n{broken\n`)
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    const composed = await $.prompt.compose({ model: 'claude-opus-4-1', promptModel: 'claude-opus-4-1', surfaces: [surface], tools: [], outputStyle: null, traits: [] } as never)
+    expect(composed.sections.map(x => x.text).join('\n')).toContain('· lesson: <under 15 words>')
+
+    await toolTurn($, clock, 't1', 'Done.\n\nTurn: Found the slow query · lesson: the index was never used · check: the plan output.')
+    const page = '/home/me/.claude/session-board/journal/2026/10/2026-10-12.md'
+    let md = files.get(page) ?? ''
+    expect(md).toContain('# Work journal: Monday, 12 October 2026')
+    expect(md).toContain('**2 turns · 2 projects · 5 min of Claude work · 2 to check**')
+    expect(md).toContain('### iams-ups · 4 min')
+    expect(md).toContain('- 09:00 Found the slow query · 1 min')
+    expect(md).toContain('- [ ] staging URL · *iams-ups, 08:30*\n- [ ] the plan output · *vault, 09:00*')
+    expect(md).toContain('## Lessons learned\n\n- the index was never used · *vault, 09:00*')
+    // no prompt text, no file names
+    expect(md).not.toContain('secret prompt text')
+    expect(md).not.toContain('/home/me/vault/')
+    // the JSONL keeps the lesson too
+    expect(files.get('/home/me/.claude/session-board/log/2026-10-12/me.jsonl')).toContain('"lesson":"the index was never used"')
+
+    // your own notes survive the next rebuild; a turn with no summary still lands
+    files.set(page, `${md}Tired after the call.\n`)
+    await toolTurn($, clock, 't2', 'No summary line here.')
+    md = files.get(page) ?? ''
+    expect(md).toContain('*1 turn with no summary* · 1 min')
+    expect(md.endsWith('## My notes\n\nTired after the call.\n')).toBe(true)
+    const copies = () => [...files.keys()].filter(k => /\/2026-10-12\.edited-\d{6}\.md$/.test(k))
+    expect(copies()).toEqual([])
+
+    // a line written outside "## My notes" is not thrown away: the edited page is kept beside the new one
+    files.set(page, md.replace('## Reflections\n', '## Reflections\n\nA long day, but a good one.\n'))
+    await toolTurn($, clock, 't3', 'Turn: Closed the ticket')
+    expect(copies().length).toBe(1)
+    expect(files.get(copies()[0]!)).toContain('A long day, but a good one.')
+    expect(files.get(page)).toContain('- 09:0')
+    expect(files.get(page)).not.toContain('A long day, but a good one.')
+    expect(files.get(page)!.endsWith('Tired after the call.\n')).toBe(true)
+
+    // a check you tick stays ticked on the next rebuild, with no copy kept
+    files.set(page, files.get(page)!.replace('- [ ] staging URL', '- [x] staging URL'))
+    await toolTurn($, clock, 't4', 'Turn: Read the logs')
+    expect(files.get(page)).toContain('- [x] staging URL · *iams-ups, 08:30*\n- [ ] the plan output')
+    expect(copies().length).toBe(1)
+  })
+
+  test(`journal on: a session start rebuilds every logged day with no page, a stale page or a cut one, and leaves an up-to-date page alone (${surface})`, { options: { journal: true } }, async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-12T10:00:00') })
+    const files = new Map<string, string>()
+    const LOG = '/home/me/.claude/session-board/log'
+    const PAGES = '/home/me/.claude/session-board/journal/2026/10'
+    const days = ['2026-10-01', '2026-10-05', '2026-10-08', '2026-10-09', '2026-10-12']
+    bottom(on, files, { isRepo: false, status: [], numstat: [], runs: [], logDirs: [...days, 'notes'] })
+    on('prompt.compose', () => ({ sections: [] }))
+    const line = (at: string, did: string) => JSON.stringify({ at, project: 'iams-ups', did, mins: 2, status: 'answered' })
+    for (const day of days) files.set(`${LOG}/${day}/other.jsonl`, `${line('09:00', `First of ${day}`)}\n${line('09:40', `Second of ${day}`)}\n`)
+    const current = (day: string) =>
+      renderJournal(day, new Map([['other', parseLog(files.get(`${LOG}/${day}/other.jsonl`)!)]]), 'My own line.')
+    // 10-01: no page. 10-05: a page from before its second turn. 10-08: a page cut short by a crash.
+    files.set(`${PAGES}/2026-10-05.md`, renderJournal('2026-10-05', new Map([['other', parseLog(line('09:00', 'First of 2026-10-05'))]]), 'My own line.'))
+    files.set(`${PAGES}/2026-10-08.md`, current('2026-10-08').slice(0, 200))
+    // 10-09: up to date, with your own line in Reflections
+    const edited = current('2026-10-09').replace('## Reflections\n', '## Reflections\n\nA good day.\n')
+    files.set(`${PAGES}/2026-10-09.md`, edited)
+
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await $.turn.start({ text: 'x', turnId: 'wait' }) // lets the start's queued rebuild finish
+
+    expect(files.get(`${PAGES}/2026-10-01.md`)).toContain('- 09:40 Second of 2026-10-01 · 2 min')
+    expect(files.get(`${PAGES}/2026-10-05.md`)).toContain('- 09:40 Second of 2026-10-05 · 2 min')
+    expect(files.get(`${PAGES}/2026-10-05.md`)!.endsWith('## My notes\n\nMy own line.\n')).toBe(true)
+    expect(files.get(`${PAGES}/2026-10-08.md`)).toBe(renderJournal('2026-10-08', new Map([['other', parseLog(files.get(`${LOG}/2026-10-08/other.jsonl`)!)]])))
+    expect(files.get(`${PAGES}/2026-10-09.md`)).toBe(edited)
+    expect(files.get(`${PAGES}/2026-10-12.md`)).toContain('- 09:40 Second of 2026-10-12 · 2 min')
+    // only the cut page counted as edited: a copy of it, nothing else
+    expect([...files.keys()].filter(k => k.includes('.edited-')).map(k => k.slice(PAGES.length + 1, PAGES.length + 11))).toEqual(['2026-10-08'])
+  })
+
+  test(`journal on: a turn that starts at 23:58 and ends after midnight stays on the day it started (${surface})`, { options: { journal: true } }, async ($, on) => {
+    const clock = mock.clock(on, { now: Date.parse('2026-10-12T23:58:00') })
+    const files = new Map<string, string>()
+    bottom(on, files, { isRepo: false, status: [], numstat: [], runs: [] })
+    on('prompt.compose', () => ({ sections: [] }))
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await toolTurn($, clock, 't1', 'Turn: Wrapped the late fix', 5 * 60_000)
+    expect(files.get('/home/me/.claude/session-board/journal/2026/10/2026-10-12.md')).toContain('**Evening**\n\n- 23:58 Wrapped the late fix · 5 min')
+    expect([...files.keys()].some(k => k.includes('2026-10-13'))).toBe(false)
+  })
+
+  test(`journal off: no page, and the turn guidance asks for no lesson (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: Date.parse('2026-10-12T09:00:00') })
+    const files = new Map<string, string>()
+    bottom(on, files, { isRepo: false, status: [], numstat: [], runs: [] })
+    on('prompt.compose', () => ({ sections: [] }))
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    const composed = await $.prompt.compose({ model: 'claude-opus-4-1', promptModel: 'claude-opus-4-1', surfaces: [surface], tools: [], outputStyle: null, traits: [] } as never)
+    expect(composed.sections.map(x => x.text).join('\n')).not.toContain('lesson')
+    await toolTurn($, clock, 't1', 'Turn: Fixed a.md')
+    expect([...files.keys()].some(k => k.includes('/journal/') || k.includes('/log/'))).toBe(false)
+  })
+
+  for (const noMove of [false, true]) {
+    test(`journal on: the page is written to a temp file and moved over the old one${noMove ? '; a failed move writes in place and clears the temp file' : ''} (${surface})`, { options: { journal: true } }, async ($, on) => {
+      const clock = mock.clock(on, { now: Date.parse('2026-10-12T09:00:00') })
+      const files = new Map<string, string>()
+      const repo: Repo = { isRepo: false, status: [], numstat: [], runs: [], noMove }
+      bottom(on, files, repo)
+      on('prompt.compose', () => ({ sections: [] }))
+      on('tool.call', () => ({ result: 'ok' }))
+      await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+      await toolTurn($, clock, 't1', 'Turn: Fixed a.md')
+      const page = '/home/me/.claude/session-board/journal/2026/10/2026-10-12.md'
+      expect(files.get(page)).toContain('- 09:00 Fixed a.md · 1 min')
+      expect(files.has(`${page}.tmp`)).toBe(false)
+      const moves = repo.runs.filter(r => r[0] === 'mv' || r[2] === 'move').map(r => r.slice(-2).map(posix))
+      expect(moves).toEqual([[`${page}.tmp`, page]])
+      expect(repo.runs.some(r => r[0] === 'rm' && posix(r.at(-1)!) === `${page}.tmp`)).toBe(noMove)
+    })
+  }
+
+  test(`journal folder setting: the page goes where it says (${surface})`, { options: { journal: true, journalDir: '~/Notes/Work Journal' } }, async ($, on) => {
+    const clock = mock.clock(on, { now: Date.parse('2026-10-12T09:00:00') })
+    const files = new Map<string, string>()
+    bottom(on, files, { isRepo: false, status: [], numstat: [], runs: [] })
+    on('prompt.compose', () => ({ sections: [] }))
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await toolTurn($, clock, 't1', 'Turn: Fixed a.md')
+    expect(files.get('/home/me/Notes/Work Journal/2026/10/2026-10-12.md')).toContain('- 09:00 Fixed a.md · 1 min')
   })
 
   const BOARD = '/home/me/.claude/session-board'
