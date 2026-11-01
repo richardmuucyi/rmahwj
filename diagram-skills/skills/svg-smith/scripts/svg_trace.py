@@ -111,6 +111,7 @@ def main():
     # vtracer omits a viewBox; without one the file cannot scale responsively.
     # Check the <svg> element itself -- vtracer emits an XML declaration first, so
     # text.split(">")[0] would inspect that and always report the attribute missing.
+    import sys as _sys; _sys.dont_write_bytecode = True   # no .pyc in the skill folder
     from _svgkit import ensure_root_attr
     text = ensure_root_attr(text, "viewBox", f"0 0 {w} {h}")
     text = text.replace('width="', 'data-src-width="', 1).replace('height="', 'data-src-height="', 1)

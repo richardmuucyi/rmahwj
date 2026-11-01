@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse, io, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
+import sys as _sys; _sys.dont_write_bytecode = True   # no .pyc in the skill folder
 from _svgkit import Harness, read_svg, rasterize
 
 from PIL import Image
@@ -103,6 +104,9 @@ def main():
     elif mine[2] > hi * 1.6:
         print(f"BUSY ({mine[2]:.1f}). Well above the references — likely too much fine detail, "
               "which will collapse at small sizes. Check the survival column.")
+    elif mine[2] < lo:
+        print(f"SLIGHTLY LOW ({mine[2]:.1f}, band floor {lo:.1f}). Within 25% of the lowest reference, "
+              "so not a fail, but below every reference.")
     else:
         print(f"IN BAND ({mine[2]:.1f}). Silhouette complexity is comparable to the references.")
 

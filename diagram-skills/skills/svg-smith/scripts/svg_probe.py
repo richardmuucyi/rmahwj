@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse, json, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
+import sys as _sys; _sys.dont_write_bytecode = True   # no .pyc in the skill folder
 from _svgkit import Harness, read_svg, measure, rasterize
 
 # Exporter-default id names only. An earlier version listed bare "a"/"b"/"g" as prefixes,

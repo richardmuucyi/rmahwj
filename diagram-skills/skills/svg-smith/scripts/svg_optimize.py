@@ -116,6 +116,8 @@ def main():
         print("NOT VERIFIED - you asked to skip the render check.")
         return
 
+    import sys as _sys; _sys.dont_write_bytecode = True   # no .pyc in the skill folder
+
     from _svgkit import Harness, rasterize, resolve_bg
     from PIL import Image
     import io as _io

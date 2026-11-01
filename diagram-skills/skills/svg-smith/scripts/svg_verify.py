@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import numpy as np
 from PIL import Image, ImageDraw
+import sys as _sys; _sys.dont_write_bytecode = True   # no .pyc in the skill folder
 from _svgkit import Harness, read_svg, rasterize
 
 # No escapes anywhere in these patterns on purpose: this file gets written through several

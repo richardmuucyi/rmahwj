@@ -29,6 +29,7 @@ sys.path.insert(0, str(HERE))
 
 import numpy as np
 from PIL import Image
+import sys as _sys; _sys.dont_write_bytecode = True   # no .pyc in the skill folder
 from _svgkit import Harness, read_svg, rasterize
 
 GRID = 8            # tiles per side for the worst-tile check

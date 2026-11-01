@@ -1,6 +1,6 @@
 ---
 name: svg-smith
-description: Create, reproduce, fix or verify any SVG — brand logos, product marks, icons, emblems, badges, simple illustrations. Use whenever someone wants an SVG or vector made, a logo recreated/vectorised/recoloured/resized, an icon or badge designed, or an existing SVG cleaned up, split, shrunk or debugged — including symptom-phrased problems like a logo file that is absurdly large, artwork that breaks or blurs at small sizes, or two SVGs on one page corrupting each other's colours. Fires even when nobody says "SVG". NOT when a raster image is itself the deliverable (raster image generation), though for figurative marks this skill takes a flat generated image and vectorises it. NOT for editing or upscaling photos, NOT for diagrams generated from structure or data (d2-diagram / mermaid-visual-review), NOT for multi-page HTML documents or walkthroughs.
+description: Create, reproduce, fix or verify any SVG — brand logos, product marks, icons, emblems, badges, simple illustrations, and dense richly detailed illustrated scenes (isometric islands, towns, machines) designed and reviewed through craft lenses. Use whenever someone wants an SVG or vector made, a logo recreated/vectorised/recoloured/resized, an icon or badge designed, or an existing SVG cleaned up, split, shrunk or debugged — including symptom-phrased problems like a logo file that is absurdly large, artwork that breaks or blurs at small sizes, or two SVGs on one page corrupting each other's colours. Fires even when nobody says "SVG". NOT when a raster image is itself the deliverable (raster image generation), though for figurative marks this skill takes a flat generated image and vectorises it. NOT for editing or upscaling photos, NOT for diagrams generated from structure or data (d2-diagram / mermaid-visual-review), NOT for multi-page HTML documents or walkthroughs.
 ---
 
 # SVG Smith
@@ -34,6 +34,7 @@ Everything below is machinery for obeying these two.
 | "an SVG of a fox reading", a face, a figure, an animal, a mascot - anything **figurative** | **B4 — Generate, then vectorise** | Go there FIRST; do not open with hand-drawing |
 | "clean up / recolour / resize / split this SVG I have" | **A, minus the hunt** | You already hold the reference — probe, transform, verify |
 | "vectorise this image / make this PNG into an SVG" | **A, with the image as the target** | Identify what the image *is*, then fetch it — see below |
+| "a dense, richly detailed scene", "an isometric town / island / machine", "make it as rich as that illustration" | **C — Dense scene** | Density built on purpose, reviewed lens by lens against a reference |
 
 If a request mixes them ("our logo but as a flat mono icon"), fetch first, then author from
 the real geometry. Never author the part you could have fetched.
@@ -384,6 +385,89 @@ rather than letting them assume you drew it.
 
 ---
 
+## Lane C — dense illustrated scenes
+
+For scenes whose job is to inspire through density and rich detail: floating islands, isometric
+towns and harbours, machines, fantasy cities. Build them **by script, never by typed coordinates**:
+a dense scene is hundreds of shaded faces, and only a generator you re-render after every change
+converges. Read `references/dense-scenes.md` first — it holds the ten craft lenses, each with the
+ideas it gives while designing, the check it runs while reviewing, and the number or failure that
+earned it.
+
+### C1. Pick the reference and the route
+
+Fetch one or two **dense references** (the contest set in `references/dense-scenes.md` scores 12–33
+on `svg_quality.py`; or one the client names — then it is the acceptance gate, as in B3). Include
+one on the route you will draw: a flat-route scene judged only against a layered painting gets
+asked for sheen it must not have. Decide the
+density route out loud: **line and pattern** (few gradients, repeated linework) or **layered painting**
+(many stacked translucent light and shadow shapes). They share no technique.
+
+### C2. Plan the composition in words
+
+Before any code: the hero mass, one big foreground anchor, the connective tissue that makes the large
+parts one machine, the curved forms that break box monotony, the negative-space diagonal, and the
+small life (a turning fan, falling water). Ask the client only what changes the drawing (B1 rules
+apply): the subject, the mood, where it will be seen.
+
+### C3. Build with `scripts/iso_scene.py`, starting from the worked example
+
+**Read `examples/tea_village.py` first.** It is a finished scene at the designer finish (critics: 5.5/10
+against a 9 reference, up from 4), and its docstring maps every Lens 10 rule to the code that does it.
+Copy its structure, not its subject: a new subject needs its own buildings and props, but the light,
+the rock, the masses, the clouds, the haze, the leading line and the draw order carry over.
+
+`Iso` gives the projection, culled and shaded faces with registered gradients and painted light,
+boxes with rim light, roofs, low-poly bodies, tube and hangar strips, end caps, upright cylinders and
+in-plane detail rectangles; `Painter` sorts by depth. Run `python scripts/iso_scene.py --demo out.svg`
+once to see it work. Write the scene's own generator next to its output, import the toolkit, and
+**render after every change** — look at the whole frame and at 2.5× crops. Import it without
+leaving bytecode in the skill folder: set `sys.dont_write_bytecode = True` before
+`sys.path.insert(0, <skill>/scripts)` and `import iso_scene`. Beyond solid geometry the toolkit now
+draws the designer-finish pieces: `hip_roof()` (lit-rim roofs with lantern underglow),
+`mass_row()` (any repeated row, such as bushes, crates or reeds, as one scalloped three-tone mass),
+`cel_cloud()`, `haze()`, `leading_line()`, `cast_shadow()` with `ground_clip()`, `columns()`,
+`curved_tone()`, `frustum()` (a round, tapering tower: lighthouse, chimney, funnel) and `y_plane()`
+(flat art on a +y face, the twin of `x_plane()`). Inside `Iso.frame(swap=True)` every name is local:
+`on_face("y")` is the local +y face. Pass
+`Iso(prefix="x-")` when two scenes may share a page, so their ids do not collide. Anything else
+(glows, water, subject props) is yours to write, through `Iso.face()` so it shades like the rest.
+
+**Keep the default flat finish.** `Iso` lights from the screen's upper left and gives every face one
+crisp plane tone; `cast_shadow()` throws hard multiply shadows and `columns()` builds a rock
+underside that tapers to teeth. The older soft look (`finish="airbrush"`: light patches, sheen,
+continuous ramps) is what a tester called "student work instead of designer master". Lens 10 lists
+what moved the scene from student to designer.
+
+### C4. Review lens by lens
+
+Run the review pass at the end of `references/dense-scenes.md`, in order: route, tonal rhythm
+(`svg_quality.py --against` the reference; judge the number, not its verdict line: aim for about 12 on
+the painting route, while a flat-route dusk or night scene lands near 8–10 and a flat daytime scene
+near 11 (the sky-ship test: 11.4), and that is fine; below that, `scripts/scene_compare.py measure` shows which band is thin), frame fill (`measure` with the
+subject's group ids),
+one-machine integration, curved masses, painted light with its glare control, surface detail crops,
+hidden faces and depth order, animation alive (`measure` again), then the Lens 10 finish checklist. Fix and re-render
+until each passes.
+
+Then run `python scripts/finish_check.py scene.svg --route flat` (or `lines` / `painting`, per Lens 1).
+It fails on the cheap tells of student work: airbrush overlays, see-through grey shadows, hairline
+detail, blur, and clip paths that draw nothing. It must pass before any critic sees the scene.
+
+Then the critic rounds, with the brief in `references/critic-brief.md`, word for word. Each round
+uses a **fresh** agent: it scores reference and scene 1–10 for "could ship as commercial illustration"
+and ranks the faults left, each with crop evidence and a drawing fix. Open its crops and fix only the
+faults they show. Stop when the score plateaus. The author never grades its own scene.
+
+### C5. Show it beside the reference
+
+Deliver a side-by-side (reference | flat reference, for a flat-route scene | before | now) at the same size and 2.5× before/now crops of the
+areas you changed: `python scripts/scene_compare.py sheet out.png "REFERENCE=ref.svg" "BEFORE=a.svg"
+"NOW=b.svg"` and `scene_compare.py crops`. The numbers support the judgement; the client's eye on the side-by-side is the
+judgement.
+
+---
+
 ## The harness
 
 Headless Chromium via Playwright, because `getBBox()` resolves transforms, clips and text
@@ -401,6 +485,10 @@ relative to this skill's folder.
 | `scripts/svg_trace.py` | Raster to vector, with fidelity measured against the source. |
 | `scripts/svg_quality.py` | Is this mark as visually structured as the marks I am aiming at? |
 | `scripts/svg_vectorise.py` | Generated flat raster to delivered vector in one gated command. |
+| `scripts/finish_check.py` | Lane C gate: fails a scene on student-work tells (airbrush overlays, see-through grey shadows, hairline share, blur, clip paths that draw nothing). `--route flat\|lines\|painting`. No browser. |
+| `scripts/scene_compare.py` | Lane C: `sheet` lays out reference \| before \| now at one height; `crops` saves zoom crops by fraction boxes (run twice with the same boxes for before/now); `measure` prints strip scores (Lens 2), subject frame fill from group ids (Lens 3) and whether the animation runs (Lens 9). |
+| `examples/tea_village.py` | Lane C worked example at the designer finish: run with `--out` outside the skill; read its docstring before building a scene. |
+| `scripts/iso_scene.py` | A toolkit (not a command) for Lane C: isometric projection, culled faces in crisp plane tones (flat finish, the default), cast shadows, columnar rock undersides, rounded machinery, depth sorting. `--demo out.svg` builds a sample scene and checks it is well-formed. |
 
 If Playwright is missing: `pip install playwright && playwright install chromium`.
 
@@ -443,6 +531,14 @@ stroke handling, icon-set systems, and the design questions worth asking.
 
 `references/figurative-marks.md` — figures reserved from a filled disc: proportion ratios,
 filling the roundel, why same-fill-on-same-fill reads as a hat, and what survives a shrink.
+
+`references/critic-brief.md` — Lane C's critic brief, word for word, and the rules for using its
+answers (fresh agent each round, check its crops, stop at a plateau).
+
+`references/dense-scenes.md` — Lane C's ten craft lenses (density routes, tonal rhythm, frame fill,
+one-machine integration, rounded machinery, painted light, surface detail, hidden faces, life, the
+designer finish), the
+16-scene reference set with its measured density band, and the review pass.
 
 `references/reconstruction.md` — the narrow case where the hunt genuinely comes up empty and a
 vendor ships a mark only as raster. Read it before tracing anything with gradients: whole-image
