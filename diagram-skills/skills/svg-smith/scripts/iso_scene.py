@@ -124,6 +124,7 @@ class Iso:
         self._grads = {}
         self.prefix = prefix            # put in front of every id this Iso makes: two scenes on one page do not collide
         self._extra = []                # clip paths and filters registered by the helpers below
+        self._battered = {}             # (x, y, dx, dy) -> (z, dz, batter): on_face follows these walls' slope
 
     # ---------------------------------------------------------------- projection
     def pt(self, x, y, z):
@@ -301,10 +302,65 @@ class Iso:
 
     def on_face(self, face, x, y, dx, dy, u0, u1, z0, z1, eps=.012):
         """Corners of a rectangle drawn ON a box's visible face (for windows, doors, labels, panels).
-        face 'y' = the plane y+dy (u runs along x); face 'x' = the plane x+dx (u runs along y)."""
+        face 'y' = the plane y+dy (u runs along x); face 'x' = the plane x+dx (u runs along y).
+        On a battered_box() with the same (x, y, dx, dy) the corners follow its inward-leaning wall."""
         if face == "y":
-            return [(x + u0, y + dy + eps, z0), (x + u1, y + dy + eps, z0), (x + u1, y + dy + eps, z1), (x + u0, y + dy + eps, z1)]
-        return [(x + dx + eps, y + u0, z0), (x + dx + eps, y + u1, z0), (x + dx + eps, y + u1, z1), (x + dx + eps, y + u0, z1)]
+            pts = [(x + u0, y + dy + eps, z0), (x + u1, y + dy + eps, z0), (x + u1, y + dy + eps, z1), (x + u0, y + dy + eps, z1)]
+        else:
+            pts = [(x + dx + eps, y + u0, z0), (x + dx + eps, y + u1, z0), (x + dx + eps, y + u1, z1), (x + dx + eps, y + u0, z1)]
+        bat = self._battered.get((round(x, 6), round(y, 6), round(dx, 6), round(dy, 6)))
+        if not bat:
+            return pts
+        bz, bdz, b = bat
+        out = []
+        for px, py, pz in pts:
+            f = min(max((pz - bz) / bdz, 0.0), 1.0)
+            ix, iy = dx * b * f, dy * b * f
+            if face == "y":
+                out.append((x + ix + (px - x) * (dx - 2 * ix) / dx, py - iy, pz))
+            else:
+                out.append((px - ix, y + iy + (py - y) * (dy - 2 * iy) / dy, pz))
+        return out
+
+    def battered_box(self, x, y, z, dx, dy, dz, base, batter=.07, rim=True):
+        """A box whose walls lean INWARD as they rise (the top is inset by `batter` of the width on each
+        side): the defining silhouette of Himalayan, Pueblo and fortress masonry, where a vertical box
+        reads as a die. Faces take plane tones like box(). The box registers itself, so every later
+        on_face() with the same (x, y, dx, dy) - windows, bands, doors - follows the slope."""
+        ix, iy = dx * batter, dy * batter
+        zt = z + dz
+        self._battered[(round(x, 6), round(y, 6), round(dx, 6), round(dy, 6))] = (z, dz, batter)
+        top = [(x + ix, y + iy, zt), (x + dx - ix, y + iy, zt), (x + dx - ix, y + dy - iy, zt), (x + ix, y + dy - iy, zt)]
+        fy = [(x, y + dy, z), (x + dx, y + dy, z), (x + dx - ix, y + dy - iy, zt), (x + ix, y + dy - iy, zt)]
+        fx = [(x + dx, y, z), (x + dx, y + dy, z), (x + dx - ix, y + dy - iy, zt), (x + dx - ix, y + iy, zt)]
+        out = [self.face(top, base, (0, 0, 1)), self.face(fy, base, (0, 1, .2)), self.face(fx, base, (1, 0, .2))]
+        if rim:
+            rc = self.lighten(base, .7)
+            tl, tc, tr = self.pt(*top[3]), self.pt(*top[2]), self.pt(*top[1])
+            out.append(f'<polyline points="{fmt(tl[0])},{fmt(tl[1])} {fmt(tc[0])},{fmt(tc[1])} {fmt(tr[0])},{fmt(tr[1])}" fill="none" '
+                       f'stroke="{rc}" stroke-width="1.6" stroke-linejoin="round" opacity=".95"/>' + seg(tc, self.pt(x + dx, y + dy, z), stroke=rc, stroke_width="1.2", opacity=".75"))
+        return "".join(out)
+
+    def subdivide(self, face, x, y, z, dx, dy, dz, base, bands=2, strips=3, strip_w=.12, lip=.03, ledge=.06):
+        """Break a large flat wall into readable parts so it never reads as an empty plane: `bands`
+        setback ledges across it (a pale lip over a dark strip, like a course stepping back) and
+        `strips` buttress pilasters a step lighter, each with a thin shadow edge. Draws ON the face of
+        the box (x, y, z, dx, dy, dz) and follows a battered wall. Use it on podiums, retaining walls
+        and long plain facades; a critic called them "two huge flat planes" without it."""
+        L = dx if face == "y" else dy
+        tone = self.face_tone(base, face)
+        lit, dark, pil = self.lighten(tone, .2), self.darken(tone, .22), self.lighten(tone, .09)
+        poly = lambda pts, c: f'<polygon points="{self.P(pts)}" fill="{c}"/>'
+        out = []
+        for j in range(1, strips + 1):
+            u = L * j / (strips + 1)
+            out.append(poly(self.on_face(face, x, y, dx, dy, u - strip_w / 2, u + strip_w / 2, z, z + dz, eps=.008), pil))
+            out.append(poly(self.on_face(face, x, y, dx, dy, u + strip_w / 2, u + strip_w / 2 + .025, z, z + dz, eps=.008), dark))
+        for i in range(1, bands + 1):
+            zz = z + dz * i / (bands + 1)
+            out.append(poly(self.on_face(face, x, y, dx, dy, 0, L, zz - ledge, zz, eps=.01), dark))
+            out.append(poly(self.on_face(face, x, y, dx, dy, 0, L, zz, zz + lip, eps=.012), lit))
+        return "".join(out)
 
     def gable_roof(self, x, y, z, dx, dy, h, base, eave=.15):
         ym = y + dy / 2
@@ -942,6 +998,9 @@ def demo(out: Path):
     p.add(1.0, iso.x_strips(.2, 1.9, -.4, 0, .9, 0, math.pi, "#d5d9ea", 12)            # a small hangar:
           + iso.x_cap(1.9, -.4, 0, .9, 0, math.pi, "#e3e6f1"))                           # shell, then its arched end
     p.add(3.5, iso.upright_cylinder(2.4, .9, 0, 1.6, .25, "#3d4270"))
+    p.add(-2.2, iso.battered_box(-3.2, -.2, 0, .8, .7, .7, "#ece4d4")                     # a battered hut; its
+          + f'<polygon points="{iso.P(iso.on_face("y", -3.2, -.2, .8, .7, .3, .5, .15, .5, eps=.02))}" fill="#2a2226"/>'  # window leans too
+          + iso.box(-1.0, 1.7, 0, 1.6, .5, .8, "#cbbda8") + iso.subdivide("y", -1.0, 1.7, 0, 1.6, .5, .8, "#cbbda8", strips=1))
     p.add(.2, iso.frustum(-2.4, 1.6, 0, 2.2, .45, .28, "#f2ece0"))                     # a tapered tower
     crag, _, facets = iso.crag(3.6, -3.2, [(0, 1.3), (1.2, 1.0), (2.4, .55), (3.2, 0)], 5, n=10, snow=2.4)
     p.add(-4.0, crag + iso.facet_shadow((3.0, -2.6, 1.2, .45, .45, .6), facets)

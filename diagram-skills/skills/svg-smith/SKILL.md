@@ -434,7 +434,8 @@ draws the designer-finish pieces: `hip_roof()` (lit-rim roofs with lantern under
 `curved_tone()`, `crag()` (a mountain or rock spire with ledges, snow and cracks) with
 `facet_shadow()` (shadows projected onto its sloping facets), `shadow_union()` (overlapping shadows
 darken once), `value_budget()` (whites stepped down by distance from the focal object, so nothing
-outshines it), `stairs()`, `figure()`, `truss()`,
+outshines it), `battered_box()` (masonry that leans inward; windows drawn on it follow the lean),
+`subdivide()` (ledges and pilasters that break a large wall), `stairs()`, `figure()`, `truss()`,
 `frustum()` (a round, tapering tower: lighthouse, chimney, funnel) and `y_plane()`
 (flat art on a +y face, the twin of `x_plane()`). Inside `Iso.frame(swap=True)` every name is local:
 `on_face("y")` is the local +y face. Pass

@@ -291,6 +291,18 @@ re-scored. Each item is a drawing rule with the failure that earned it.
   / 83, then `iso.box(..., tone(x, y, z))` per building. Turn clouds into haze capped at about L* 91.
   Measured on the monastery: pixels brighter than the hall's white went from 15.6% of the frame to
   1.5%.
+- **Let masonry lean.** A vertical whitewashed box reads as a die; the inward-tapering (battered) wall is
+  the defining silhouette of Himalayan, Pueblo and fortress building, and a critic searched the
+  monastery for it and found none. `Iso.battered_box(..., batter=.07)` insets the top 7% of the
+  width on each side; it registers itself, so windows, bands and doors drawn later with `on_face()`
+  on the same box follow the lean (they become trapezoids) with no extra code. 7% reads on small
+  houses; 5% on big blocks is subtle.
+- **Break big planes with geometry, not lines.** A podium or retaining wall left as one tone reads as
+  "two huge flat planes". `Iso.subdivide(face, box..., bands=2, strips=3)` paints setback ledges (a
+  pale lip over a dark strip) and buttress pilasters a step lighter, and follows a battered wall. On
+  the flat route this is the answer to "the flat reference outlines its panels": the panels come from
+  tone steps, not dark outlines. Keep the strip count low (about one per 0.9 units of width), or the
+  wall turns into a grid.
 - **Overlapping shadows darken once.** Two multiply shapes that overlap stack: tested, the overlap
   went from (119,105,126) to (66,55,95), a dark seam no light makes. Paint all the shadows that fall
   on one set of surfaces through `Iso.shadow_union(shadows)`: flat shapes inside one group, and the
@@ -368,8 +380,9 @@ and the toolkit's `hip_roof`, `mass_row`, `cel_cloud`, `haze`, `leading_line`, `
 `ground_clip`, `columns`, `crag` (a faceted mountain with ledges, snow and cracks) with
 `facet_shadow` and `facet_clip`, `curved_tone`, `frustum` (with `cap=False` for painted bands), `y_plane`,
 `plane_tone`, `truss` (cranes, gantries, masts: chords of 2 px or more read as steel, 1 px as wire),
-`figure` (small people for scale), `value_budget` (tones by distance from the focal object) and
-`shadow_union` (overlapping shadows darken once).
+`figure` (small people for scale), `value_budget` (tones by distance from the focal object),
+`shadow_union` (overlapping shadows darken once), `battered_box` (walls that lean inward) and
+`subdivide` (ledges and pilasters on a large wall).
 
 **The finish check, calibrated.** `scripts/finish_check.py` counts the cheap tells. Its limits were
 set on these files: the student scene must fail, the designer pass and the flat contest pieces must
