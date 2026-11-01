@@ -47,7 +47,7 @@ def render(h, path, px):
 
 def sheet(argv):
     px = _opt(argv, "--px", 900)
-    out, pairs = argv[0], [a.split("=", 1) for a in argv[1:]]
+    out, pairs = argv[0], [a.rsplit("=", 1) for a in argv[1:]]     # the last "=" splits, so labels may hold "="
     ims = []
     with Harness() as h:
         for label, path in pairs:

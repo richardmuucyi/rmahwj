@@ -537,6 +537,10 @@ def build(paint_light=.6):
                    f'<g id="islet-tea"><animateTransform attributeName="transform" type="translate" values="0,0;0,5;0,0" dur="9s" repeatCount="indefinite"/>{"".join(distant[2:9])}</g>'
                    f'<g id="islet-pine"><animateTransform attributeName="transform" type="translate" values="0,0;0,-5;0,0" dur="8s" repeatCount="indefinite"/>{"".join(distant[9:])}</g>')
 
+    # a hazed group is isolated (its filter), so a multiply shadow inside it would paint flat lavender:
+    # bake the shadow to a solid colour, the islet grass multiplied by the shadow tint
+    distant_svg = distant_svg.replace('fill="#8d86c0" style="mix-blend-mode:multiply"', 'fill="#4a6444"')
+
     # ================================================================ hero island
     hero = []
     # underside: hanging columns, flat planes, warm bounce on the down faces

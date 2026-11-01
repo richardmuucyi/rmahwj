@@ -32,6 +32,7 @@ smoke test that the module still works.
 from __future__ import annotations
 
 import math
+import re
 import random
 import sys
 from contextlib import contextmanager
@@ -535,6 +536,201 @@ class Iso:
         cp = f' clip-path="{clip}"' if clip else ""
         return f'<polygon points="{" ".join(f"{fmt(a)},{fmt(b)}" for a, b in hull)}" fill="{tint}" style="mix-blend-mode:multiply"{cp}/>'
 
+    def face_tone(self, col, face):
+        """The tone a colour takes on a box's visible face ("x", "y" or "top"), so a window, band or
+        sign painted on a dark face darkens with it instead of glowing untoned."""
+        n = {"x": (1, 0, 0), "y": (0, 1, 0), "top": (0, 0, 1)}[face]
+        return self.plane_tone(col, n)
+
+    def stairs(self, x, y, z, n, run=.22, rise=.14, width=.6, axis="x", col="#cfc6b4", sign=1):
+        """A straight flight of n steps starting at (x, y, z), climbing along +axis (sign=-1 to climb
+        toward -axis), each step `run` deep and `rise` high, `width` wide. Treads take the top tone,
+        risers the face tone; drawn far to near so they overlap correctly."""
+        out = []
+        order = range(n) if sign > 0 else range(n - 1, -1, -1)      # far to near: x + y grows toward us
+        for i in order:
+            z0, z1 = z + i * rise, z + (i + 1) * rise
+            if axis == "x":
+                bx = x + sign * i * run if sign > 0 else x - (i + 1) * run
+                out.append(self.box(bx, y, z0, run, width, rise, col, rim=False))
+            else:
+                by = y + sign * i * run if sign > 0 else y - (i + 1) * run
+                out.append(self.box(x, by, z0, width, run, rise, col, rim=False))
+        return "".join(out)
+
+    # ---------------------------------------------------------------- mountains and slope shadows
+    def crag(self, cx, cy, rings, seed, n=14, rock="#b7a28b", snow=None, snow_col="#eef2f8", top=None,
+             shelves=.84, shelf_col="#a9a46c", rock_dark=None, crack=True):
+        """A mountain, crag or rock spire as a faceted mass. `rings` = [(z, R), ...] from the base up
+        (R = 0 makes a summit point). Every facet takes a flat plane tone; with `shelves` a near-flat
+        ledge ring follows each middle ring, so pale up-facing ledges alternate with cliff bands;
+        faces above z `snow` (jagged) turn `snow_col`; `top` (a colour) caps it with a flat summit
+        plateau; `rock_dark` overrides the rock's shadow tone (keep it well below the sky); `crack`
+        adds dark slivers on some rock faces.
+        Returns (svg, rad, facets): rad(theta, z) is the mass's radius at that height (to seat
+        buildings on it), and facets lists the visible faces as (triangle_pts3, normal), for
+        facet_shadow() and for a clip path of the exact silhouette (facet_clip())."""
+        r = random.Random(seed)
+        off = [r.uniform(-.22, .22) for _ in range(n)]
+        mul = [r.uniform(.86, 1.12) for _ in range(n)]
+        if shelves:
+            rr_ = []
+            for k, (z, R) in enumerate(rings):
+                rr_.append((z, R))
+                if 0 < k < len(rings) - 1 and R > 0 and not (top and k == len(rings) - 1):
+                    rr_.append((z + .06, R * shelves))
+            rings = rr_
+        pts, last = [], len(rings) - 1
+        for k, (z, R) in enumerate(rings):
+            if R == 0:
+                pts.append([(cx + r.uniform(-.2, .2), cy + r.uniform(-.2, .2), z)] * n)
+                continue
+            ring = []
+            for i in range(n):
+                a = 2 * math.pi * (i + off[i] + .07 * k) / n
+                q = R * mul[i] * r.uniform(.93, 1.07)
+                zz = z if (k == 0 or (k == last and top)) else z + r.uniform(-.3, .3)
+                ring.append((cx + q * math.cos(a), cy + q * math.sin(a), zz))
+            pts.append(ring)
+        tris = []
+        for A, B in zip(pts, pts[1:]):
+            for i in range(n):
+                a1, a2, b1, b2 = A[i], A[(i + 1) % n], B[i], B[(i + 1) % n]
+                if a1 != a2:
+                    tris.append((a1, a2, b1))
+                if b1 != b2:
+                    tris.append((a2, b2, b1))
+        sr = random.Random(seed + 1)
+        items, facets = [], []
+        dark_rock = rock_dark or self.tone_set(rock)[3]
+        for t in tris:
+            nrm = normal(*t)           # ring winding gives the outward normal (shelves face up)
+            cen = [sum(p[i] for p in t) / 3 for i in range(3)]
+            if not self.facing(nrm):
+                continue
+            col = rock
+            up = nrm[2] / (math.sqrt(sum(c * c for c in nrm)) or 1)
+            if up > .75 and shelves:
+                col = snow_col if (snow is not None and cen[2] > snow - 3.5) else shelf_col
+            if snow is not None and cen[2] > snow + sr.uniform(-.7, .7):
+                col = snow_col
+            tone = self.shade(col, nrm)
+            if col == rock and rock_dark and tone == self.tone_set(rock)[3]:
+                tone = rock_dark
+            svg = f'<polygon points="{self.P(t)}" fill="{tone}" stroke="{tone}" stroke-width=".6" stroke-linejoin="round"/>'
+            if crack and col == rock and sr.random() < .45:
+                a, b, c = t
+                u = sr.uniform(.3, .7)          # one draw per crack (keeps scenes reproducible)
+                m = tuple(b[i] + (c[i] - b[i]) * u for i in range(3))
+                f = sr.uniform(.55, .85)
+                tip = tuple(a[i] + (m[i] - a[i]) * f for i in range(3))
+                c2 = tuple(a[i] + (c[i] - a[i]) * .1 for i in range(3))
+                if tone != dark_rock:
+                    svg += f'<polygon points="{self.P([a, tip, c2])}" fill="{dark_rock}"/>'
+            items.append((cen[0] + cen[1] + cen[2], svg))
+            facets.append((t, nrm))
+        if top:
+            items.append((1e9, self.face(pts[-1], top, (0, 0, 1))))
+        items.sort(key=lambda q: q[0])
+        zs, Rs = [z for z, _ in rings], [R for _, R in rings]
+
+        def rad(theta, z):
+            for k in range(len(zs) - 1):
+                if zs[k] <= z <= zs[k + 1]:
+                    R = Rs[k] + (Rs[k + 1] - Rs[k]) * (z - zs[k]) / ((zs[k + 1] - zs[k]) or 1)
+                    break
+            else:
+                R = Rs[0] if z < zs[0] else Rs[-1]
+            return R * mul[int(round((theta / (2 * math.pi)) * n)) % n]
+        return "".join(svg for _, svg in items), rad, facets
+
+    def facet_clip(self, facets):
+        """Register a clip path shaped like a crag's whole visible silhouette; return its url()."""
+        cid = f"{self.prefix}fc{len(self._extra)}"
+        self._extra.append(f'<clipPath id="{cid}">{"".join(f"<polygon points={chr(34)}{self.P(t)}{chr(34)}/>" for t, _ in facets)}</clipPath>')
+        return f"url(#{cid})"
+
+    def facet_shadow(self, box, facets, tint="#8d86c0", reach=4.0):
+        """The shadow a box (x, y, z, dx, dy, dz) throws onto sloping rock: its corners are projected
+        along the light onto the PLANE of each nearby lit facet and clipped to that facet, so on a
+        steep face the shadow is a narrow sliver running down the slope, not a flat-ground pool.
+        Facets turned away from the light are skipped: they are in shadow already. Each piece is a
+        crisp multiply shape clipped on itself (never inside a clipped group: that isolates the blend).
+        Put it after the crag and before the box. Returns svg."""
+        x, y, z, dx, dy, dz = box
+        L = self.light
+        corners = [(x + i * dx, y + j * dy, z + k * dz) for i in (0, 1) for j in (0, 1) for k in (0, 1)]
+        bx, by = x + dx / 2, y + dy / 2
+        if not hasattr(self, "_fclip"):
+            self._fclip = {}
+        out = []
+        for t, nrm in facets:
+            cen = [sum(p[i] for p in t) / 3 for i in range(3)]
+            if math.hypot(cen[0] - bx, cen[1] - by) > reach or cen[2] > z + dz:
+                continue
+            nl = math.sqrt(sum(c * c for c in nrm)) or 1
+            n = tuple(c / nl for c in nrm)
+            ndl = sum(a * b for a, b in zip(n, L))
+            if ndl <= .05:
+                continue
+            p0 = t[0]
+            above = [sum(n[i] * (c[i] - p0[i]) for i in range(3)) for c in corners]
+            if max(above) <= 1e-6:      # the box is wholly behind this facet's plane: no shadow lands here
+                continue
+            proj = []
+            for c, h in zip(corners, above):
+                tt = max(0.0, h / ndl)
+                proj.append(self.pt(*(c[i] - tt * L[i] for i in range(3))))
+            hull = hull2d(proj)
+            tri = [self.pt(*q) for q in t]
+            if (max(q[0] for q in hull) < min(q[0] for q in tri) or min(q[0] for q in hull) > max(q[0] for q in tri)
+                    or max(q[1] for q in hull) < min(q[1] for q in tri) or min(q[1] for q in hull) > max(q[1] for q in tri)):
+                continue
+            key = tuple(round(v, 4) for q in t for v in q)
+            if key not in self._fclip:
+                cid = f"{self.prefix}fs{len(self._extra)}"
+                self._extra.append(f'<clipPath id="{cid}"><polygon points="{self.P(t)}"/></clipPath>')
+                self._fclip[key] = cid
+            out.append(f'<polygon points="{" ".join(f"{fmt(a)},{fmt(b)}" for a, b in hull)}" fill="{tint}" '
+                       f'style="mix-blend-mode:multiply" clip-path="url(#{self._fclip[key]})"/>')
+        return "".join(out)
+
+    # ---------------------------------------------------------------- value budget and shadow union
+    @staticmethod
+    def value_budget(focal, tones, radii):
+        """A value budget by distance from the focal object, so nothing outshines it. `focal` is its
+        world point (x, y, z); `tones` are colours from the nearest tier to the farthest, each one
+        a step darker (whitewash L* 91 / 87 / 83 against a focal white of 95); `radii` are the outer
+        distances of every tier but the last. Returns tone(x, y, z) -> colour: call it per building
+        and give the focal building its own, brighter colour. A critic found ~40 white roofs and the
+        clouds out-shining a gold-and-red hall until whites were stepped down like this.
+
+            tone = Iso.value_budget(hall_centre, ("#ece4d4", "#e2d8c5", "#d8cdb9"), (3.2, 6.0))
+            iso.box(x, y, z, w, d, h, tone(x + w / 2, y + d / 2, z))"""
+        assert len(tones) == len(radii) + 1, "one radius per tier except the last"
+
+        def tone(x, y, z):
+            dist = math.dist((x, y, z), focal)
+            for col, r in zip(tones, radii):
+                if dist < r:
+                    return col
+            return tones[-1]
+        return tone
+
+    @staticmethod
+    def shadow_union(shadows, tint=None):
+        """Paint a set of multiply shadows so that where they overlap they darken ONCE. Each shadow
+        is drawn as a plain flat shape inside one group, and the group is multiplied onto the scene.
+        Separate multiply shapes stack: tested, an overlap of two went (119,105,126) -> (66,55,95).
+        `shadows` are svg strings from cast_shadow() / facet_shadow() (their own clip paths are
+        kept); `tint` overrides their fill. Every shadow in one union must fall on surfaces drawn
+        BEFORE the union, and the group must not sit inside a clipped/filtered/faded group (that
+        isolates the blend: see finish_check's `isolated`)."""
+        body = "".join(shadows).replace(' style="mix-blend-mode:multiply"', "")
+        if tint:
+            body = re.sub(r'fill="#[0-9a-fA-F]{3,6}"', f'fill="{tint}"', body)
+        return f'<g style="mix-blend-mode:multiply">{body}</g>' if body else ""
+
     def ground_clip(self, pts3):
         """Register a clip path shaped like a ground polygon (a terrace top, a deck, a quay) and
         return its url(), for shadows and props that must not spill off that surface."""
@@ -694,11 +890,17 @@ class Iso:
         out.append(seg((qa[0], qa[1] - .8), (qb[0], qb[1] - .8), stroke=rim, stroke_width="1", opacity=".9"))
         return "".join(out)
 
-    def figure(self, x, y, z, s=1.0, body="#3b5a9a", skin="#e2b48a", hat=None, carry=None):
-        """A small person standing at (x, y, z): contact shadow, body, head, optional hat colour and
-        optional carried box colour. People give scale; use several, never one stamped pose."""
+    def figure(self, x, y, z, s=1.0, body="#3b5a9a", skin="#e2b48a", hat=None, carry=None, pose="stand"):
+        """A small person at (x, y, z): contact shadow, body, head, optional hat colour and carried box
+        colour. pose: "stand", or "bow" (kneeling or prostrate, for worship or work on the ground).
+        People give scale; mix poses and sizes, never one stamped figure. At 1200 px wide a figure
+        under about 8 px tall cannot be read: use s=1.5-2 near the focal building."""
         px, py = self.pt(x, y, z)
         h = self.s * .34 * s
+        if pose == "bow":
+            return (f'<ellipse cx="{fmt(px + h * .15)}" cy="{fmt(py)}" rx="{fmt(h * .4)}" ry="{fmt(h * .1)}" fill="#8d86c0" style="mix-blend-mode:multiply"/>'
+                    f'<path d="M{fmt(px - h * .3)},{fmt(py)} Q{fmt(px - h * .05)},{fmt(py - h * .55)} {fmt(px + h * .3)},{fmt(py - h * .12)} L{fmt(px + h * .3)},{fmt(py)} Z" fill="{body}"/>'
+                    f'<circle cx="{fmt(px + h * .36)}" cy="{fmt(py - h * .1)}" r="{fmt(h * .12)}" fill="{skin}"/>')
         out = [f'<ellipse cx="{fmt(px + h * .12)}" cy="{fmt(py)}" rx="{fmt(h * .3)}" ry="{fmt(h * .1)}" fill="#8d86c0" style="mix-blend-mode:multiply"/>',
                f'<path d="M{fmt(px - h * .2)},{fmt(py)} L{fmt(px - h * .13)},{fmt(py - h * .78)} L{fmt(px + h * .13)},{fmt(py - h * .78)} L{fmt(px + h * .2)},{fmt(py)} Z" fill="{body}"/>',
                f'<path d="M{fmt(px + h * .02)},{fmt(py)} L{fmt(px + h * .06)},{fmt(py - h * .78)} L{fmt(px + h * .13)},{fmt(py - h * .78)} L{fmt(px + h * .2)},{fmt(py)} Z" fill="{self.plane_tone(body, (1, 0, 0))}"/>',
@@ -732,13 +934,18 @@ def demo(out: Path):
     rim = [(4.2 * math.cos(2 * math.pi * i / 24), 4.2 * math.sin(2 * math.pi * i / 24)) for i in range(24)]
     under = iso.columns(0, 0, 0, lambda a: 4.2, 5.0, 3, nsec=16)
     ground = f'<polygon points="{iso.P([(x, y, 0) for x, y in rim])}" fill="#8fd14f"/>'
-    p.add(-1, iso.cast_shadow(-1.6, -1.2, 0, 1.4, 1.2, 1.1) + iso.box(-1.6, -1.2, 0, 1.4, 1.2, 1.1, "#ffd9a8") + iso.gable_roof(-1.6, -1.2, 1.1, 1.4, 1.2, .8, "#e8555d"))
+    tone = Iso.value_budget((-.9, -.6, .5), ("#ffd9a8", "#f0cc9c"), (2.5,))           # the house is the focal object
+    p.add(-1, Iso.shadow_union([iso.cast_shadow(-1.6, -1.2, 0, 1.4, 1.2, 1.1), iso.cast_shadow(-1.3, -.4, 0, .5, .5, .9)])
+          + iso.box(-1.6, -1.2, 0, 1.4, 1.2, 1.1, tone(-.9, -.6, 0)) + iso.gable_roof(-1.6, -1.2, 1.1, 1.4, 1.2, .8, "#e8555d"))
     p.add(2.6, iso.tree(1.6, 1.0, 1.0, seed=7))
     p.add(-3.6, iso.facets(iso.lowpoly([(0, 1.6), (1.8, 1.1), (3.4, 0)], 11, n=8), "#86d6e4", offset=(-1.4, -2.6, 0), cap_from=2.0, cap_col="#d8f6ff"))
     p.add(1.0, iso.x_strips(.2, 1.9, -.4, 0, .9, 0, math.pi, "#d5d9ea", 12)            # a small hangar:
           + iso.x_cap(1.9, -.4, 0, .9, 0, math.pi, "#e3e6f1"))                           # shell, then its arched end
     p.add(3.5, iso.upright_cylinder(2.4, .9, 0, 1.6, .25, "#3d4270"))
     p.add(.2, iso.frustum(-2.4, 1.6, 0, 2.2, .45, .28, "#f2ece0"))                     # a tapered tower
+    crag, _, facets = iso.crag(3.6, -3.2, [(0, 1.3), (1.2, 1.0), (2.4, .55), (3.2, 0)], 5, n=10, snow=2.4)
+    p.add(-4.0, crag + iso.facet_shadow((3.0, -2.6, 1.2, .45, .45, .6), facets)
+          + iso.box(3.0, -2.6, 1.2, .45, .45, .6, "#f2ece0"))                              # a crag, a hut, its slope shadow
     sail = "".join(f'<rect x="-.04" y="0" width=".08" height=".7" fill="#e9dcc0" transform="rotate({a})"/>' for a in (0, 90, 180, 270))
     p.add(1.9, f'<g transform="{iso.y_plane(-.9, .02, .62)}">{sail}</g>')                # sails on a +y face
     svg = iso.document(800, 640, ground + p.render(), title="iso_scene demo", background=f'<rect width="800" height="640" fill="#1a1d5c"/>{under}')

@@ -399,7 +399,10 @@ earned it.
 Fetch one or two **dense references** (the contest set in `references/dense-scenes.md` scores 12–33
 on `svg_quality.py`; or one the client names — then it is the acceptance gate, as in B3). Include
 one on the route you will draw: a flat-route scene judged only against a layered painting gets
-asked for sheen it must not have. Decide the
+asked for sheen it must not have. Pick the subject reference by what it shares with your subject:
+floating islands and cities, the 1.0 floating island; castles, mountains and climbing towns, the 1.3
+castle journey; machines and vehicles, the 1.3 disco machine or isometric truck; forests and nature,
+the 1.3 sunset forest or 1.2 jungle island. The flat reference is the 1.3 isometric truck. Decide the
 density route out loud: **line and pattern** (few gradients, repeated linework) or **layered painting**
 (many stacked translucent light and shadow shapes). They share no technique.
 
@@ -413,7 +416,8 @@ apply): the subject, the mood, where it will be seen.
 ### C3. Build with `scripts/iso_scene.py`, starting from the worked example
 
 **Read `examples/tea_village.py` first.** It is a finished scene at the designer finish (critics: 5.5/10
-against a 9 reference, up from 4), and its docstring maps every Lens 10 rule to the code that does it.
+against an 8.5–9 reference, up from 4), and its docstring says which Lens 10 rules it shows and which
+it does not.
 Copy its structure, not its subject: a new subject needs its own buildings and props, but the light,
 the rock, the masses, the clouds, the haze, the leading line and the draw order carry over.
 
@@ -427,7 +431,11 @@ leaving bytecode in the skill folder: set `sys.dont_write_bytecode = True` befor
 draws the designer-finish pieces: `hip_roof()` (lit-rim roofs with lantern underglow),
 `mass_row()` (any repeated row, such as bushes, crates or reeds, as one scalloped three-tone mass),
 `cel_cloud()`, `haze()`, `leading_line()`, `cast_shadow()` with `ground_clip()`, `columns()`,
-`curved_tone()`, `frustum()` (a round, tapering tower: lighthouse, chimney, funnel) and `y_plane()`
+`curved_tone()`, `crag()` (a mountain or rock spire with ledges, snow and cracks) with
+`facet_shadow()` (shadows projected onto its sloping facets), `shadow_union()` (overlapping shadows
+darken once), `value_budget()` (whites stepped down by distance from the focal object, so nothing
+outshines it), `stairs()`, `figure()`, `truss()`,
+`frustum()` (a round, tapering tower: lighthouse, chimney, funnel) and `y_plane()`
 (flat art on a +y face, the twin of `x_plane()`). Inside `Iso.frame(swap=True)` every name is local:
 `on_face("y")` is the local +y face. Pass
 `Iso(prefix="x-")` when two scenes may share a page, so their ids do not collide. Anything else

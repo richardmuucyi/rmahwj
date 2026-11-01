@@ -1,6 +1,6 @@
 {
   "name": "diagram-skills",
-  "version": "0.4.1",
+  "version": "0.4.3",
   "description": "Three skills for pictures made from structure: D2 diagrams rendered and checked, mermaid diagrams reviewed and polished, and SVG logos, icons, badges and dense illustrated scenes made or repaired.",
   "author": {
     "name": "Richard"

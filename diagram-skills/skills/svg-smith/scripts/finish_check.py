@@ -9,7 +9,8 @@ scene. Each is a rule from references/dense-scenes.md Lens 10. The rules hold fo
 geometric lion). Two other routes use on purpose what the flat route forbids: LINE ART carries form
 in fine strokes (the 1.3 machine lineart: 32% hairlines), and LAYERED PAINTING stacks translucent
 shadows and blur (the 1.0 and 1.3 castle screens). `--route lines` and `--route painting` check only
-the two things that are wrong in any style: the toolkit's airbrush overlays and clip-g.
+the three things that are wrong in any style: the toolkit's airbrush overlays, isolated blends and
+clip-g.
 
   airbrush     faces painted with the toolkit's soft overlays (paintLight / paintAO / paintSheen).
                The flat finish has none.
@@ -20,6 +21,11 @@ the two things that are wrong in any style: the toolkit's airbrush overlays and 
   blur         shapes that use a filter with feGaussianBlur (airbrushed clouds and mist).
   dashes       dashed strokes (stroke-dasharray): on a waterfall or a road they read as road markings;
                two critics in two scenes flagged them. Moving water is a repeating gradient.
+  isolated     a mix-blend-mode shape (a multiply shadow) inside a group that has a clip-path, mask,
+               filter or opacity: that group is isolated, the blend has nothing beneath it to darken,
+               and the shadow paints as flat pale paint (tested in Chromium: (156,156,178) where the
+               same shadow outside the group gives (137,117,67)). Clip the shape itself instead
+               (Iso.cast_shadow(clip=...)), or move the shadow out of the group.
   clip-g       a <clipPath> in use whose shapes sit inside <g>: a browser clips everything away, so
                the clipped art draws nothing (tested in Chromium; Inkscape still draws it, so even
                contest files carry this defect).
@@ -40,8 +46,8 @@ from pathlib import Path
 
 SVG = "{http://www.w3.org/2000/svg}"
 DRAWN = {"path", "polygon", "polyline", "line", "rect", "circle", "ellipse"}
-LIMITS = {"airbrush": 0, "alpha-shadow": .01, "hairline": .15, "blur": 2, "dashes": 0, "clip-g": 0}   # alpha-shadow, hairline: share of drawn shapes
-PAINTING = ("airbrush", "clip-g")
+LIMITS = {"airbrush": 0, "alpha-shadow": .01, "hairline": .15, "blur": 2, "dashes": 0, "isolated": 0, "clip-g": 0}   # alpha-shadow, hairline: share of drawn shapes
+PAINTING = ("airbrush", "isolated", "clip-g")
 
 
 def lum(col: str) -> float | None:
@@ -78,6 +84,12 @@ def check(path: Path, route: str = "flat") -> dict:
     blur_ids = {f.get("id") for f in root.iter(SVG + "filter") if f.find(f".//{SVG}feGaussianBlur") is not None}
     counts = {k: 0 for k in LIMITS}
     drawn = 0
+    parent = {c: p for p in root.iter() for c in p}
+
+    def isolating(g):
+        a = style_map(g)
+        return (any(a.get(k, "none") not in ("none", "") for k in ("clip-path", "mask", "filter"))
+                or num(a.get("opacity"), 1) < 1 or a.get("isolation") == "isolate")
     for el in root.iter():
         tag = el.tag.replace(SVG, "")
         if tag == "clipPath" and el.find(SVG + "g") is not None and f"url(#{el.get('id')})" in text:
@@ -105,6 +117,13 @@ def check(path: Path, route: str = "flat") -> dict:
             Ls = lum(a.get("stroke", ""))
             if Ls is not None and Ls < 70 and sop < .6 and "mix-blend-mode" not in a:
                 counts["alpha-shadow"] += 1
+        if a.get("mix-blend-mode", "normal") != "normal":
+            q = parent.get(el)
+            while q is not None and q is not root:
+                if isolating(q):
+                    counts["isolated"] += 1
+                    break
+                q = parent.get(q)
         if a.get("stroke-dasharray", "none") not in ("none", "0", ""):
             counts["dashes"] += 1
         stroke = a.get("stroke", "none")
@@ -133,7 +152,7 @@ def main():
     if "--json" in sys.argv:
         print(json.dumps(rows, indent=2))
     else:
-        cols = ["drawn", "airbrush", "alpha-shadow", "hairline", "blur", "dashes", "clip-g"]
+        cols = ["drawn", "airbrush", "alpha-shadow", "hairline", "blur", "dashes", "isolated", "clip-g"]
         print(f"route: {route}" + ("" if route == "flat" else " (checks airbrush and clip-g only)"))
         print(f"{'file':40s}" + "".join(f"{c:>13s}" for c in cols) + "  verdict")
         print(f"{'limit':40s}{'':>13s}" + "".join(f"{('<=' + str(LIMITS[c])):>13s}" for c in cols[1:]))

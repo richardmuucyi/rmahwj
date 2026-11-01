@@ -11,7 +11,8 @@ Every bracket:
 - **[sheet.png]** made with `scene_compare.py sheet`, four panels for a flat-route scene: the subject
   reference | a flat reference | [before] | [now]; three panels (no flat reference) otherwise. Say the
   panel order in the brief's file line.
-- **[reference.svg] / [scene.svg]** the files behind the panels; list the flat reference too.
+- **[reference.svg] / [before.svg] / [scene.svg]** the files behind the panels; list the flat
+  reference too.
 - **[skill]** the svg-smith folder; **[W]x[H]** the scene's viewBox size; **[a]-[b]** the share of the
   square render the scene's content spans (for 1200x1000: 0.083-0.917).
 - **[route]** flat, lines or painting (Lens 1); **[a scratch folder]** any folder outside the skill.
@@ -28,7 +29,7 @@ You are an art director. Score and critique; do not praise for its own sake. The
 
 Files (read PNGs with the Read tool, which shows images):
 - Side-by-side: [sheet.png] (left to right: [panel order]).
-- SVGs for zooming: [reference.svg], [flat reference.svg if any] and [scene.svg].
+- SVGs for zooming: [reference.svg], [flat reference.svg if any], [before.svg] and [scene.svg].
 - Crop helper: `python [skill]/scripts/scene_compare.py crops <svg> <out-prefix> x0,y0,x1,y1 ... --px 1800`
   (boxes are fractions of a square render; a [W]x[H] scene is letterboxed, its content spans y [a]-[b]).
   Write crops only into [a scratch folder]. Edit no other file.
@@ -51,8 +52,9 @@ for it (for example, count the shadow polygons before writing "no cast shadows")
 Route rules for the flat route (paste as [route rules]): "one key light from the upper left; every face
 one of three or four flat tones; crisp cast shadows drawn as opaque multiply shapes; no gradient
 washes, no translucent grey overlays, no blur; a thin pale lip on lit top edges is the only line
-worth keeping; the one exception: emitted light (glows, beams, a halo) and haze on far objects may be
-translucent."
+worth keeping; the exceptions: emitted light (glows, beams, a halo), haze on far objects and the
+sky's backdrop gradient; a cast shadow lowers its ground by at least 20 L*; nothing is brighter than
+the focal object's lit face."
 
 **Compare like with like.** The contest reference most scenes are measured against (the 1.0 floating
 island) is a layered painting: 799 gradients and about 2,500 opacity declarations. A flat-route scene
@@ -65,15 +67,19 @@ lion).
 - **A new agent every round.** One that has seen the last list anchors on it.
 - **Open its crops before acting.** Fix only the faults the crops show. On the worked example, one
   critic reported a "dead-centre" pagoda and "evenly scattered" lanterns after both had been changed;
-  on the harbour test, one said "no cast shadows" in a file with 44 and another said "no reflections"
-  where they existed.
+  on the harbour test, one said "no reflections" where they existed. But check before you dismiss: the
+  same harbour critic said "no cast shadows" in a file with 44 shadow shapes, and it was RIGHT: all 44
+  sat in isolated groups and painted as flat lavender (`finish_check.py` now counts these). The SVG
+  holding a shape is not proof the shape renders.
 - **Expect conflicting taste.** One critic said "shrink the hero to 70% of the width"; the next said
   "scale it up and bleed it off the edge". Prefer faults several critics agree on, and faults with a
   crop that shows them.
-- **A plateau is read inside each round.** Stop when, two rounds running, "now" scores no higher than
-  "before" in that round's own reply (scores across critics are not comparable; the gains within a
+- **A plateau is read inside each round.** Run at most 4 rounds. From round 2 on, stop at the first
+  round whose "now" scores no higher than its "before" in that round's own reply (scores across critics are not comparable; the gains within a
   round are). The worked example's "now" went 5.5 → 5.5; the sky-ship test's 6 → 5. Past that point
   the critic's taste is the variable, not the scene: hand the side-by-side to the owner.
+- **A tie** ("now" equals "before"): deliver the version with fewer open faults in the latest reply;
+  if that is even, the earlier one, since the later change bought nothing.
 - **Roll back a fix a later critic says made it worse.** On the sky-ship test the round-3 critic found
   two regressions that came straight from round 2's advice. Keep every scored version; deliver the one
   that scored highest as "now", not the latest.

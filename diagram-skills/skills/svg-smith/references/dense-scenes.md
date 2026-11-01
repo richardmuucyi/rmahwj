@@ -73,8 +73,9 @@ and counts light/dark switches per row. So it sees **large-scale value alternati
 **Design.** Alternate pale and dark across big areas: pale lit facets beside shaded ones, pale
 machinery against dark sky, light roofs against mid-tone grass.
 
-**Review.** Run `svg_quality.py scene.svg --against <two or three dense references>`. Aim **≥ 12**,
-and judge by that number, not by the script's verdict line: it allows 0.75× below the lowest reference,
+**Review.** Run `svg_quality.py scene.svg --against <two or three dense references>`. The target
+depends on the route and the light (SKILL.md C4): about 12 on the painting route, 8–10 for a flat dusk
+or night scene, about 11 for a flat daytime scene. Judge by that number, not by the script's verdict line: it allows 0.75× below the lowest reference,
 so it printed "IN BAND (7.7)" against a 9.5–12.2 band on a real run, and with one reference the band
 collapses to a single value.
 - *Where is it thin?* The score is a mean over rows; to find the weak band, score horizontal strips:
@@ -187,6 +188,9 @@ with `Painter`. Split anything that wraps another (a ring around a peak) into ba
 - **Stacked levels** (terraces, tiers, decks): x + y alone cannot order things on different heights.
   What worked: draw each level's walls and back items from the bottom level up, then its front items
   from the top level down.
+- **A peak is the reverse.** On terraces that rise toward the centre the rule above holds. On a steep
+  peak whose ground rises toward the BACK, sort by x + y + z (higher things are further away): the
+  monastery test found the terrace rule draws them in the wrong order.
 
 ## Lens 9 — Life (optional, but it inspires)
 
@@ -221,7 +225,19 @@ re-scored. Each item is a drawing rule with the failure that earned it.
   - Delete gradient washes, sheen and light-patch overlays.
   - A thin pale lip on light-facing top edges is the only line worth keeping.
 - **Hard shadows.** Every building and tree throws a crisp shadow away from the light
-  (`Iso.cast_shadow`, a multiply fill). A grey alpha polygon reads as a smudge.
+  (`Iso.cast_shadow`, a multiply fill). A grey alpha polygon reads as a smudge. A shadow must lower
+  its ground by at least 20 L*; one that lowered it by 7 read as pink paving.
+  - **A shadow lands on the receiving surface's own plane**, clipped to that surface. On a mountain the
+    ground-plane hexagon of `cast_shadow()` is wrong: project the base edge down the slope's fall line
+    and clip it to the rock facet it lands on (a narrow sliver, not a pool). `Iso.facet_shadow(box,
+    facets)` does this for a crag from `Iso.crag()`: it projects the box's corners along the light
+    onto each nearby lit facet's plane and clips each piece to its facet (on the monastery, 297 pieces
+    from 29 platforms replaced the flat-ground hexagons).
+  - *Failure, and a silent one:* a multiply shadow inside a group that has a clip-path, mask, filter
+    or opacity paints as flat pale paint, because that group is isolated and the blend has nothing
+    beneath it. It broke 29 of 89 shadows in the monastery test and all 44 in the harbour test, and
+    every check passed. Clip the shadow itself (`cast_shadow(clip=...)`), keep it out of such groups,
+    or bake it to a solid colour (ground × tint). `finish_check.py` now counts these as `isolated`.
   - *Failure:* near a rim the shadows spilled off the island into the sky. Clip them to the ground
     they fall on: `cast_shadow(..., clip=iso.ground_clip(top_polygon))`.
   - *Failure:* on pale paving the default tint read as lavender paint. Darken the ground's own colour
@@ -264,9 +280,24 @@ re-scored. Each item is a drawing rule with the failure that earned it.
 - **Distinct building silhouettes.** Five types at minimum, each readable at thumbnail size, varying
   storeys, roof pitch and ridge direction; keep a motif (an oculus, a chimney) on three buildings at
   most; thin the detail in the back third.
-- **Light effects are the one exception to "no translucency".** Emitted light (lamp and window glows,
-  a lighthouse beam, the moon's halo) and atmospheric haze on far objects may be translucent. Shadows,
-  form and water never are.
+- **Light effects and the sky are the exceptions to "no translucency" and "no gradients".** Emitted
+  light (lamp and window glows, a lighthouse beam, the moon's halo), atmospheric haze on far objects
+  and the sky's own backdrop gradient are allowed. Shadows, form, clouds and water never use them.
+- **Nothing outshines the focal object: give the scene a value budget.** A cloud top, a wall or a sky
+  patch brighter than the focal building's lit face pulls the eye away. On the monastery, about 40
+  white roofs (L* 95) and the clouds (L* 97–100) out-shone a gold-and-red hall (L* 49–75). Keep the
+  brightest white for the focal building, and step every other white down by distance from it:
+  `tone = Iso.value_budget(focal_xyz, ("#ece4d4", "#e2d8c5", "#d8cdb9"), (3.2, 6.0))` gives L* 91 / 87
+  / 83, then `iso.box(..., tone(x, y, z))` per building. Turn clouds into haze capped at about L* 91.
+  Measured on the monastery: pixels brighter than the hall's white went from 15.6% of the frame to
+  1.5%.
+- **Overlapping shadows darken once.** Two multiply shapes that overlap stack: tested, the overlap
+  went from (119,105,126) to (66,55,95), a dark seam no light makes. Paint all the shadows that fall
+  on one set of surfaces through `Iso.shadow_union(shadows)`: flat shapes inside one group, and the
+  group multiplies once. The union is drawn at one place in the order, so it suits shadows whose
+  receiving surfaces are all drawn before it (a crag's facets, a terrace layer). Shadows on surfaces
+  drawn later (a platform top inside its own item) stay single. On the monastery, 2,585 overlap
+  pixels lightened from L 107 to 149.
 - **Day scenes need their own palette.** The toolkit's defaults (cloud ramps, the rock ramp and its
   warm bounce, the roof underglow) are tuned for dusk. For daylight use `Iso.CLOUD_DAY` /
   `CLOUD_DAY_FAR`, pass `columns(..., ramp=, bounce=None)` and `hip_roof(..., underglow=None)`, and
@@ -301,6 +332,18 @@ the rule to save each critic's answer to a file. So the skill as it stands lands
 8–9 reference on new subjects, reliably above the 4 of the first proof, and not yet at commercial
 level.
 
+**Third cold test: a mountain monastery** (halls and stairs on a peak, prayer flags, a bell tower,
+monks and pilgrims), on the skill as pushed in 0.4.1, every critic reply saved word for word in the
+test folder. Its critics scored "now" 4.5, 5, 5 against 8 (the first draft 3), below the 5.5 bar; an independent
+critic scored it 5 against 7 and 8 (its reply is saved in the test folder). Its top fault, "a flat
+lavender plaza", was the isolated-shadow bug; moving the clip onto each shadow fixed it (15,469 flat
+pixels to 0), and that version has not been re-scored. Its
+gaps became the isolated-blend check (critic 3 found the 29 broken shadows; the check confirms the same
+29), the peak draw order, the shadow-darkness floor, the sky exception, reference choice in C1,
+`stairs()`, `figure(pose=)` and `face_tone()`; then the test's own mountain code moved into the
+toolkit as `crag()` (it rebuilds the monastery's rock byte-for-byte) and `facet_shadow()` added the
+slope shadows.
+
 **The cold test.** A fresh agent given only this skill built a harbour town at dusk (boats, piers,
 warehouses, a lighthouse). Its three critic rounds scored 6, 5.5 and 5.5; an independent critic with
 the route rules in its brief scored it 6, against 8 for the reference. That is the worked example's
@@ -322,9 +365,11 @@ dark); both were rewritten by hand and still drew critic faults.
 
 **Tools.** Every rule above has code: the worked example `examples/tea_village.py` (read it first)
 and the toolkit's `hip_roof`, `mass_row`, `cel_cloud`, `haze`, `leading_line`, `cast_shadow` with
-`ground_clip`, `columns`, `curved_tone`, `frustum` (with `cap=False` for painted bands), `y_plane`,
-`plane_tone`, `truss` (cranes, gantries, masts: chords of 2 px or more read as steel, 1 px as wire) and
-`figure` (small people for scale).
+`ground_clip`, `columns`, `crag` (a faceted mountain with ledges, snow and cracks) with
+`facet_shadow` and `facet_clip`, `curved_tone`, `frustum` (with `cap=False` for painted bands), `y_plane`,
+`plane_tone`, `truss` (cranes, gantries, masts: chords of 2 px or more read as steel, 1 px as wire),
+`figure` (small people for scale), `value_budget` (tones by distance from the focal object) and
+`shadow_union` (overlapping shadows darken once).
 
 **The finish check, calibrated.** `scripts/finish_check.py` counts the cheap tells. Its limits were
 set on these files: the student scene must fail, the designer pass and the flat contest pieces must
