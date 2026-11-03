@@ -1938,7 +1938,7 @@ function filesPane($: EngineInterface, fv: FilesState, t: number, width: number,
  * After a turn: what Claude asks you to verify, and assumptions waiting for review.
  * One piece that sits beside the "this session" pill. Not repeated here: how long the turn
  * took (Claude's own "Worked for" line says it), the file counts (the Files tab has them)
- * and a link to the Turns tab (`sessions ›` opens the panel).
+ * and a link to the Turns tab (`☰ All ›` opens the panel).
  */
 function recapStrip(r: TurnRecord, review: { open: number; high: number }, ui: Kit): RenderElement {
   const { Text } = ui
@@ -2830,7 +2830,7 @@ export const register: Register = (on, options) => {
           {overlapChip(`⚠${ov?.files.length ?? 0}`)}
           <Text>{'  '}</Text>
           <Button key="sb-strip-open" plain onPress={() => $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })}>
-            <Text color={LINK}>sessions ›</Text>
+            <Text color={LINK}>☰ All ›</Text>
           </Button>
         </Box>
       )
@@ -2868,7 +2868,7 @@ export const register: Register = (on, options) => {
         {overlapChip(`⚠ ${ovWhat} · ${ovNames}`)}
         <Text>   </Text>
         <Button key="sb-strip-open" plain onPress={() => $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })}>
-          <Text color={LINK}>sessions ›</Text>
+          <Text color={LINK}>☰ All ›</Text>
         </Button>
       </Box>
     )

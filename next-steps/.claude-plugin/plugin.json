@@ -1,7 +1,7 @@
 {
   "name": "next-steps",
-  "version": "1.0.0",
-  "description": "After each turn, suggests up to three next prompts above the input. Press 1, 2 or 3 to put one in the prompt box as a draft you can edit, 0 to dismiss.",
+  "version": "1.2.1",
+  "description": "After each turn, suggests up to three next prompts above the input. Press 1, 2 or 3 to put one in the prompt box as a draft you can edit. Click ☆ to save one per project; saved steps sit beside them on 4-9, and ✕ deletes one.",
   "author": {
     "name": "Thariq Shihipar"
   },

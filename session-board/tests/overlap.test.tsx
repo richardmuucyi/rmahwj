@@ -118,8 +118,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ notes.md · vault sessions ›')
-    expect(await strip($, surface, 50)).toBe('current ✓ │ others ◔1 ⚠1 sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ notes.md · vault ☰ All ›')
+    expect(await strip($, surface, 50)).toBe('current ✓ │ others ◔1 ⚠1 ☰ All ›')
   })
 
   test(`the card lists the files Claude edited, newest last, the 200 newest (${surface})`, async ($, on) => {
@@ -149,7 +149,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.advance(5_000)
     const runs = gitStatusRuns(repo)
     await clock.advance(60_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
     expect(gitStatusRuns(repo)).toBe(runs)
   })
 
@@ -167,7 +167,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
       await edit($, [NOTES])
       await clock.advance(5_000)
-      expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 sessions ›')
+      expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
     })
   }
 
@@ -185,7 +185,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     repo.status = []
     peer(files, { id: 'peer', edits: [NOTES], seenAt: 1_030_000 })
     await clock.advance(30_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
     const runs = gitStatusRuns(repo)
     peer(files, { id: 'peer', edits: [NOTES], seenAt: 1_090_000 })
     await clock.advance(60_000)
@@ -207,7 +207,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
     await $.turn.complete({ answer: 'Committed.', durationMs: 10, isAborted: false, turnId: 't2', reason: 'answer' })
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
   })
 
   test(`a file outside the repository is not gated by git (${surface})`, async ($, on) => {
@@ -219,7 +219,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [far])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ plan.md · vault sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ plan.md · vault ☰ All ›')
   })
 
   test(`no repository: the shared file stays flagged (${surface})`, async ($, on) => {
@@ -230,7 +230,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ notes.md · vault sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ notes.md · vault ☰ All ›')
   })
 
   test(`two files and two sessions: a count and both names; narrow, the count only (${surface})`, async ($, on) => {
@@ -243,8 +243,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES, todo])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔2 ⚠ 2 files · vault, iams-ups sessions ›')
-    expect(await strip($, surface, 50)).toBe('current ✓ │ others ◔2 ⚠2 sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔2 ⚠ 2 files · vault, iams-ups ☰ All ›')
+    expect(await strip($, surface, 50)).toBe('current ✓ │ others ◔2 ⚠2 ☰ All ›')
   })
 
   test(`sessions are grouped by folder like the pills, two groups then a count (${surface})`, async ($, on) => {
@@ -258,7 +258,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔4 ⚠ notes.md · vault ×2, iams-ups, +1 sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔4 ⚠ notes.md · vault ×2, iams-ups, +1 ☰ All ›')
   })
 
   test(`pressing the chip opens the Files tab, where the shared file says who else edited it (${surface})`, async ($, on) => {
@@ -289,7 +289,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.advance(5_000)
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ notes.md · vault sessions ›')
+    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ⚠ notes.md · vault ☰ All ›')
     const card = JSON.parse(files.get(`${DIR}/me.json`) ?? '{}') as { edits?: string[] }
     expect(card.edits).toEqual([NOTES])
   })

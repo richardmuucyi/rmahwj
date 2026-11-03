@@ -197,7 +197,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     // Status line: alerts about other sessions only. A working peer and the
     // empty sessions are not alerts; this session never appears.
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ◔1 ○3 sessions ›')
+    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ◔1 ○3 ☰ All ›')
     // Every chip of the row sits on true black: "current" and "others" are white text, a status is its colour as the
     // text (so a status matches the labels), every count of the quiet sessions is a chip too, and nothing divides the groups.
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
@@ -255,12 +255,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
       status: 'replied', changedAt: 1_008_000, seenAt: 1_008_000,
     }))
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ○3 sessions ›')
+    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ○3 ☰ All ›')
 
     // A card caught mid-write keeps what it said last round.
     files.set(`${DIR}/peer.json`, '{"id":"peer","fol')
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ○3 sessions ›')
+    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ○3 ☰ All ›')
     files.set(`${DIR}/peer.json`, card({
       id: 'peer', folder: '/home/me/vault', project: 'vault', asked: 'Tidy the inbox',
       status: 'replied', changedAt: 1_008_000, seenAt: 1_015_000,
@@ -272,7 +272,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       status: 'replied', changedAt: 1_012_000, seenAt: 1_012_000,
     }))
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ✓ codesignr ○3 sessions ›')
+    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ✓ codesignr ○3 ☰ All ›')
 
     // Two sessions in one folder need you: one entry with a count.
     for (const id of ['w1', 'w2']) {
@@ -287,7 +287,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       status: 'background', tasks: ['shell: Render on the GPU'], activity: 'shell: Render on the GPU', seenAt: 1_020_000,
     }))
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? vault ×2 ? iams-ups ✓ vault ✓ codesignr ◌1 ○3 sessions ›')
+    expect(await strip($, surface)).toBe('current ◔ Working │ others ? vault ×2 ? iams-ups ✓ vault ✓ codesignr ◌1 ○3 ☰ All ›')
     // the waiting count is a magenta chip, the idle count a gray one (the colours of their status pills)
     const waiting = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
     expect(chipsOf(await waiting.find({ key: 'sb-strip' })).slice(-2)).toEqual([['#000000', ' ◌1 ', 'magenta'], ['#000000', ' ○3 ', 'gray']])
@@ -297,7 +297,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // A narrow pane: counts, not folder names.
     const narrow = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 36 } })
     const narrowStrip = await narrow.find({ key: 'sb-strip' })
-    expect(narrowStrip?.text.replace(/\s+/g, ' ').trim()).toBe('current ◔ │ others ?3 ✓2 ◌1 ○3 sessions ›')
+    expect(narrowStrip?.text.replace(/\s+/g, ' ').trim()).toBe('current ◔ │ others ?3 ✓2 ◌1 ○3 ☰ All ›')
     // the narrow strip has the same two black label chips, no pipe, and its chips touch each other too
     expect(chipsOf(narrowStrip)).toEqual([
       ['#000000', ' current  ', '#8B949E'], ['#000000', ' ◔ ', 'cyan'], ['#000000', ' others ', '#8B949E'],
@@ -328,7 +328,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await endTurn($, 't1', [{ id: 'b1', type: 'shell', description: 'Render on the GPU' }])
     expect(own(files).status).toBe('background')
     // Nothing elsewhere needs you or replied, but the job alone opens the strip (since 0.29.0; before, no strip).
-    expect(await strip($, surface)).toBe('current ◌ Waiting ◈ 1 job sessions ›')
+    expect(await strip($, surface)).toBe('current ◌ Waiting ◈ 1 job ☰ All ›')
     expect(own(files).tasks).toEqual(['shell: Render on the GPU'])
 
     // The job reports back: a turn of its own, then nothing is left in flight.

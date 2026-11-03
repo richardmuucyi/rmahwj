@@ -10,6 +10,10 @@
 // ($.prompt.suggest). Nothing is submitted by the plugin, so no origin framing.
 // The fork is also handed the session's skills and slash commands
 // ($.command.list), so a suggestion can be "/skill arguments".
+// Saved steps sit beside the suggestions on keys 4-9: 4-6 in one column, 7-9
+// in a second once the first is full. A click on a suggestion's ☆ saves it, a
+// click on a saved step's ✕ deletes it (no digit is left for either). They
+// are kept per project in $.store and stay until deleted.
 
 import type { CommandInfo, EngineInterface, Register, RenderElement } from 'claude-code'
 
@@ -27,6 +31,14 @@ const SKILL_NAME_MAX = 64
 const SKILL_DESCRIPTION_MAX = 120
 const SKILLS_DESCRIBED_BUDGET = 6000
 const SKILLS_NAMED_BUDGET = 3000
+const MAX_SAVED = 6
+const SAVED_PER_COLUMN = 3
+// Saved step N is on key N + FIRST_SAVED_KEY: 4-9.
+const FIRST_SAVED_KEY = 4
+const SAVED_KEY_PREFIX = 'saved:'
+// Cells between two columns, and the fewest a label is cut to.
+const COLUMN_GAP = 3
+const LABEL_MIN = 8
 
 // Suggestions are model output, and the model reads untrusted text (files,
 // tool results, web pages). Before any of it reaches the screen or the prompt
@@ -139,21 +151,151 @@ function parseSuggestions(reply: string, known: ReadonlySet<string> | null): Sug
   return items
 }
 
-// Session-local view state; a hot reload resets it, which is fine.
+// Saved steps live in $.store (a file of the plugin's own) under one key per
+// project root, so they survive /clear and restarts and stay until deleted.
+// The store is untrusted on read (another version, a hand edit): keep only
+// well-formed entries, cleaned as the fork's are.
+function readSaved(value: unknown): Suggestion[] {
+  if (!Array.isArray(value)) return []
+  const items: Suggestion[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const prompt = (entry as { prompt?: unknown }).prompt
+    const label = (entry as { label?: unknown }).label
+    if (typeof prompt !== 'string') continue
+    const filled = clean(prompt, PROMPT_MAX)
+    if (filled === '' || items.some(item => item.prompt === filled)) continue
+    const named = typeof label === 'string' ? clean(label, LABEL_MAX) : ''
+    items.push({ label: named === '' ? clean(filled, LABEL_MAX) : named, prompt: filled })
+    if (items.length === MAX_SAVED) break
+  }
+  return items
+}
+
+async function storeKey($: EngineInterface): Promise<string> {
+  return `${SAVED_KEY_PREFIX}${await $.session.root()}`
+}
+
+// Session-local view state; a hot reload resets it, and session.start reloads
+// the saved list from the store.
 let view: View = { kind: 'hidden' }
+let hasDraft = false
+let saved: Suggestion[] = []
+
+function redraw($: EngineInterface): void {
+  $.ui.invalidate('ui.render')
+}
 
 function show($: EngineInterface, nextView: View): void {
   view = nextView
-  $.ui.invalidate('ui.render')
+  redraw($)
+}
+
+// Back to the resting state: no suggestions. Saved steps stay drawn.
+function closeAll($: EngineInterface): void {
+  view = { kind: 'hidden' }
+  redraw($)
+}
+
+// Every read and write of the saved list goes through this one queue, so two
+// quick presses (4 then 5, or two deletes) apply in order instead of each
+// writing back its own stale copy.
+let storeQueue: Promise<unknown> = Promise.resolve()
+
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  const run = storeQueue.then(work, work)
+  storeQueue = run.catch(() => undefined)
+  return run
+}
+
+function setSaved($: EngineInterface, items: Suggestion[]): void {
+  saved = items
+  redraw($)
+}
+
+function refreshSaved($: EngineInterface): Promise<void> {
+  return queued(async () => {
+    const fresh = readSaved(await $.store.get(await storeKey($)))
+    if (JSON.stringify(fresh) !== JSON.stringify(saved)) setSaved($, fresh)
+  })
+}
+
+// Re-reads the store before each change, so a step another session saved in
+// this project is not overwritten by this session's older copy. `change`
+// answers null to refuse (the list is full); changeSaved then answers false.
+function changeSaved(
+  $: EngineInterface,
+  change: (items: Suggestion[]) => Suggestion[] | null,
+): Promise<boolean> {
+  return queued(async () => {
+    const key = await storeKey($)
+    const current = readSaved(await $.store.get(key))
+    const next = change(current)
+    if (next === null) {
+      setSaved($, current)
+      return false
+    }
+    await $.store.set(key, next)
+    setSaved($, next)
+    return true
+  })
+}
+
+function noteDraft($: EngineInterface, text: string): void {
+  const isDraft = text !== ''
+  if (isDraft === hasDraft) return
+  hasDraft = isDraft
+  redraw($)
+}
+
+function fill($: EngineInterface, prompt: string): void {
+  void $.prompt.fill({ text: prompt }).then(
+    r => r.isFilled || $.ui.toast('could not fill the prompt box'),
+    error => $.ui.toast(`could not fill: ${String(error)}`),
+  )
 }
 
 export const register: Register = (on, options) => {
   const minTurnChars = typeof options?.minAnswerChars === 'number' ? options.minAnswerChars : 80
   const suggestsSkills = options?.suggestSkills !== false
 
+  on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    await refreshSaved($).catch(error => $.ui.log(`could not read saved steps: ${String(error)}`))
+    return result
+  })
+
+  // /cd (or a worktree move) can change the project root, and saved steps are
+  // kept per root: re-read them now, not at the next turn.
+  on('classic.CwdChanged', async ($, e, next) => {
+    const result = await next(e)
+    await refreshSaved($).catch(error => $.ui.log(`could not read saved steps: ${String(error)}`))
+    return result
+  })
+
+  // /clear (or a resume) ends this conversation without starting a turn, so
+  // turn.start never hides what was offered: hide it here, which also drops a
+  // suggestion request still waiting (its reply finds its loading view gone).
+  on('session.end', async ($, e, next) => {
+    closeAll($)
+    return next(e)
+  })
+
   // A new turn (typed or otherwise) hides whatever was offered.
   on('turn.start', async ($, e, next) => {
-    if (view.kind !== 'hidden') show($, { kind: 'hidden' })
+    if (view.kind !== 'hidden') closeAll($)
+    return next(e)
+  })
+
+  // Whether the prompt box holds a draft: number keys then type into the box,
+  // so the band shows how to reach it instead.
+  on('prompt.edit', async ($, e, next) => {
+    const result = await next(e)
+    noteDraft($, result.text)
+    return result
+  })
+  on('prompt.change', async ($, e, next) => {
+    noteDraft($, e.text)
     return next(e)
   })
 
@@ -166,6 +308,8 @@ export const register: Register = (on, options) => {
     void (async () => {
       let items: Suggestion[] = []
       try {
+        // Another session in this project may have saved or deleted steps.
+        await refreshSaved($).catch(() => undefined)
         // Without the list the fork still suggests; slash prompts go unchecked.
         const commands = await $.command.list().catch(() => null)
         const known = commands === null ? null : new Set(commands.map(command => command.name))
@@ -185,45 +329,118 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next): Promise<RenderElement> => {
     const below = await next(e)
-    if (e.props.hasSurvey || e.props.isWorking || view.kind === 'hidden') return below
+    if (e.props.hasSurvey || e.props.isWorking) return below
     const { Box, Text, Button } = $.ui.resolve(e)
+    const offer = view.kind === 'offer' ? view.items : []
+    const isLoading = view.kind === 'loading'
+    const hasNext = isLoading || offer.length > 0
 
-    if (view.kind === 'loading') {
-      return (
-        <Box flexDirection="column">
-          {below}
-          <Box marginTop={1}>
-            <Text dimColor>next steps…</Text>
-          </Box>
-        </Box>
-      )
+    // Saved steps in columns of three: 4-6, then 7-9.
+    const columns: Suggestion[][] = []
+    for (let start = 0; start < saved.length; start += SAVED_PER_COLUMN) {
+      columns.push(saved.slice(start, start + SAVED_PER_COLUMN))
     }
+    if (!hasNext && columns.length === 0) return below
 
-    const items = view.items
+    // Every column gets an equal share of the band's width; a label is cut to
+    // its share less the key ("1: ") and the mark after it (" ☆", " ✕").
+    const count = (hasNext ? 1 : 0) + columns.length
+    const share = Math.floor((e.props.bodyColumns - COLUMN_GAP * (count - 1)) / count)
+    const labelRoom = Math.max(LABEL_MIN, share - 5)
+
+    const nextColumn = !hasNext ? null : isLoading ? (
+      <Box key="col-next" flexDirection="column">
+        <Text dimColor>next…</Text>
+      </Box>
+    ) : (
+      <Box key="col-next" flexDirection="column">
+        <Text dimColor>next</Text>
+        {offer.map((item, index) => {
+          const isSaved = saved.some(one => one.prompt === item.prompt)
+          return (
+            <Box key={`s${index}`} flexDirection="row" gap={1}>
+              <Button
+                key={`next-${index}`}
+                hotkey={String(index + 1)}
+                plain
+                label={clean(item.label, labelRoom)}
+                onPress={() => {
+                  closeAll($)
+                  fill($, item.prompt)
+                }}
+              />
+              {isSaved ? (
+                <Text dimColor>★</Text>
+              ) : (
+                <Button
+                  key={`star-${index}`}
+                  plain
+                  dimColor
+                  label="☆"
+                  onPress={() => {
+                    const step = item
+                    // The full check runs on the store's own list, not this
+                    // session's copy: another session may have filled it.
+                    void changeSaved($, items => {
+                      if (items.some(one => one.prompt === step.prompt)) return items
+                      return items.length >= MAX_SAVED ? null : [...items, step]
+                    }).then(
+                      isSaved => isSaved || $.ui.toast(`saved is full (${MAX_SAVED}): delete one first`),
+                      error => $.ui.toast(`could not save: ${String(error)}`),
+                    )
+                  }}
+                />
+              )}
+            </Box>
+          )
+        })}
+        <Button key="hide" hotkey="0" plain label="hide" onPress={() => closeAll($)} />
+      </Box>
+    )
+
+    const savedColumns = columns.map((column, c) => (
+      <Box key={`col-saved-${c}`} flexDirection="column">
+        <Text dimColor>{c === 0 ? 'saved' : ' '}</Text>
+        {column.map((item, row) => {
+          const index = c * SAVED_PER_COLUMN + row
+          return (
+            <Box key={`saved${index}`} flexDirection="row" gap={1}>
+              <Button
+                key={`saved-${index}`}
+                hotkey={String(index + FIRST_SAVED_KEY)}
+                plain
+                label={clean(item.label, labelRoom)}
+                onPress={() => {
+                  closeAll($)
+                  fill($, item.prompt)
+                }}
+              />
+              <Button
+                key={`del-${index}`}
+                plain
+                dimColor
+                label="✕"
+                onPress={() => {
+                  const prompt = item.prompt
+                  void changeSaved($, items => items.filter(one => one.prompt !== prompt)).catch(error =>
+                    $.ui.toast(`could not delete: ${String(error)}`),
+                  )
+                }}
+              />
+            </Box>
+          )
+        })}
+      </Box>
+    ))
+
     return (
       <Box flexDirection="column">
         {below}
-        <Box marginTop={1} />
-        <Text dimColor>next:</Text>
-        {items.map((item, index) => (
-          <Box key={`s${index}`} marginLeft={2}>
-            <Button
-              hotkey={String(index + 1)}
-              plain
-              label={item.label}
-              onPress={() => {
-                show($, { kind: 'hidden' })
-                void $.prompt.fill({ text: item.prompt }).then(
-                  r => r.isFilled || $.ui.toast('could not fill the prompt box'),
-                  error => $.ui.toast(`could not fill: ${String(error)}`),
-                )
-              }}
-            />
-          </Box>
-        ))}
-        <Box marginLeft={2}>
-          <Button hotkey="0" plain label="dismiss" onPress={() => show($, { kind: 'hidden' })} />
+        <Box marginTop={1} flexDirection="row" gap={COLUMN_GAP}>
+          {nextColumn}
+          {savedColumns}
         </Box>
+        {hasDraft ? <Text dimColor>draft in box: click a row, or ctrl+x tab first</Text> : null}
       </Box>
     )
   })

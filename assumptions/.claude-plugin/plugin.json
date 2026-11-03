@@ -1,6 +1,6 @@
 {
   "name": "assumptions",
-  "version": "0.5.1",
+  "version": "0.5.3",
   "description": "Claude logs each assumption it makes while working; review them in a side panel, mark them right or wrong, and send corrections mid-task. Verdicts survive /compact, corrections are remembered per repo, and each card shows how much work was built on it.",
   "author": { "name": "Richard" },
   "types": "./types/index.d.ts"
