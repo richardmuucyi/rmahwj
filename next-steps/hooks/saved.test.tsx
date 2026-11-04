@@ -223,30 +223,6 @@ test('saved steps are kept per project', async ($, on) => {
   await other.unmount()
 })
 
-// prompt.change is an event the engine raises, not a call on $, so the kit's
-// Engine type leaves it out; the kit raises it all the same.
-type RaisesChange = { change: (e: { text: string; cursor: number; origin: { kind: string } }) => Promise<unknown> }
-
-test('a draft in the box shows how to reach the band', async ($, on) => {
-  engine(on)
-  const prompt = $.prompt as unknown as RaisesChange
-  on('prompt.change', (_, e) => ({ text: e.text, cursor: e.cursor }))
-  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
-  await turn($, 't1')
-
-  await prompt.change({ text: 'half a thought', cursor: 14, origin: { kind: 'history' } })
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /draft in box/ }))?.text).toBe(
-    'draft in box: click a row, or ctrl+x tab first',
-  )
-  await ui.unmount()
-
-  await prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
-  const empty = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await empty.find({ type: 'Text', text: /draft in box/ })).toBeUndefined()
-  await empty.unmount()
-})
-
 test('0 hides the suggestions and keeps the saved column', async ($, on) => {
   engine(on, { 'saved:/proj': [{ label: 'kept', prompt: 'a kept step' }] })
   await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })

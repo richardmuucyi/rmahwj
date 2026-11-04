@@ -179,7 +179,6 @@ async function storeKey($: EngineInterface): Promise<string> {
 // Session-local view state; a hot reload resets it, and session.start reloads
 // the saved list from the store.
 let view: View = { kind: 'hidden' }
-let hasDraft = false
 let saved: Suggestion[] = []
 
 function redraw($: EngineInterface): void {
@@ -241,13 +240,6 @@ function changeSaved(
   })
 }
 
-function noteDraft($: EngineInterface, text: string): void {
-  const isDraft = text !== ''
-  if (isDraft === hasDraft) return
-  hasDraft = isDraft
-  redraw($)
-}
-
 function fill($: EngineInterface, prompt: string): void {
   void $.prompt.fill({ text: prompt }).then(
     r => r.isFilled || $.ui.toast('could not fill the prompt box'),
@@ -284,18 +276,6 @@ export const register: Register = (on, options) => {
   // A new turn (typed or otherwise) hides whatever was offered.
   on('turn.start', async ($, e, next) => {
     if (view.kind !== 'hidden') closeAll($)
-    return next(e)
-  })
-
-  // Whether the prompt box holds a draft: number keys then type into the box,
-  // so the band shows how to reach it instead.
-  on('prompt.edit', async ($, e, next) => {
-    const result = await next(e)
-    noteDraft($, result.text)
-    return result
-  })
-  on('prompt.change', async ($, e, next) => {
-    noteDraft($, e.text)
     return next(e)
   })
 
@@ -440,7 +420,6 @@ export const register: Register = (on, options) => {
           {nextColumn}
           {savedColumns}
         </Box>
-        {hasDraft ? <Text dimColor>draft in box: click a row, or ctrl+x tab first</Text> : null}
       </Box>
     )
   })
