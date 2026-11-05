@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginState, Register, RenderElement } from 'claude-code'
 
-import type { AgentRow, BgRow, BoardEntry, BoardStatus, CardTask, FileKind, FileRow, TaskKind, ToolKind, TurnRecord } from '../types'
+import type { AgentRow, BgRow, BoardEntry, BoardStatus, CardTask, FileKind, FileRow, KeptSnap, TaskKind, ToolKind, TurnRecord } from '../types'
 import {
   compactionNotes,
   configureGuard,
@@ -60,6 +60,8 @@ const filesView = atom({ plugin: 'session-board', key: 'files' } as const, {
   isLoading: false,
   open: null,
 })
+/** The file tracking a hot reload would lose; see filesKept in the contract. */
+const filesKept = atom({ plugin: 'session-board', key: 'filesKept' } as const, null)
 const guardAtom = atom({ plugin: 'session-board', key: 'guard' } as const, {
   chip: 'none',
   saving: 0,
@@ -78,6 +80,7 @@ const guardAtom = atom({ plugin: 'session-board', key: 'guard' } as const, {
   facts: { tasks: [], files: [], jobs: [], assumptions: 0, high: 0 },
   command: '/compact',
   boxHolds: false,
+  menuOpen: false,
 })
 
 /** One colour per state, used everywhere: strip pills, panel edges, counts. */
@@ -794,6 +797,45 @@ async function publishFiles($: EngineInterface): Promise<void> {
     if (same(list, v.list) && v.isGit === isGit && v.checkedAt === gitCheckedAt) return v
     return { ...v, list, isGit, checkedAt: gitCheckedAt }
   })
+  void saveFiles($).catch(() => undefined)
+}
+
+const packSnap = (s: Snap): KeptSnap => ({ top: s.top, head: s.head, sigs: [...s.sigs] })
+const unpackSnap = (k: KeptSnap): Snap => ({ top: k.top, head: k.head, sigs: new Map(k.sigs) })
+
+/** Keeps the file tracking in the session's state, which a hot reload of this module does not empty. */
+async function saveFiles($: EngineInterface): Promise<void> {
+  const id = me?.id
+  if (id === undefined) return
+  const sbAt = sessionBase
+  const tbAt = turnBase
+  const [sb, tb] = await Promise.all([sbAt, tbAt])
+  // A base that changed while git ran: the save that started with the new one writes instead.
+  if (sessionBase !== sbAt || turnBase !== tbAt || me?.id !== id) return
+  await update($, filesKept, () => ({
+    id,
+    session: [...sessionChanges.values()],
+    turn: [...turnChanges.values()],
+    gitSession,
+    gitTurn,
+    ...(sb ? { sessionBase: packSnap(sb) } : {}),
+    ...(tb ? { turnBase: packSnap(tb) } : {}),
+    abs: [...absByKey],
+  }))
+}
+
+/** After a hot reload: the file tracking as the module last kept it, if it is this session's. */
+async function restoreFiles($: EngineInterface, id: string): Promise<void> {
+  const k = await read($, filesKept)
+  if (!k || k.id !== id) return
+  sessionChanges = new Map(k.session.map(c => [c.key, c]))
+  turnChanges = new Map(k.turn.map(c => [c.key, c]))
+  gitSession = [...k.gitSession]
+  gitTurn = [...k.gitTurn]
+  for (const [key, path] of k.abs) absByKey.set(key, path)
+  // Compared against the snapshots taken when the session and the turn started, not one taken at the reload.
+  if (k.sessionBase) sessionBase = Promise.resolve(unpackSnap(k.sessionBase))
+  if (k.turnBase) turnBase = Promise.resolve(unpackSnap(k.turnBase))
 }
 
 /** This session's live detail for the strip and the panel; redrawn only when it changed. */
@@ -864,16 +906,6 @@ function settleTurnFiles($: EngineInterface): void {
     await publishFiles($)
     pushLive($)
   })().catch(() => undefined)
-}
-
-/** Opens the panel on the files view. */
-async function openFiles($: EngineInterface): Promise<void> {
-  // Open first, inside the press (see the recap's turn button): an open after an await is "unasked".
-  const opening = $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })
-  await update($, filesView, v => ({ ...v, view: 'files' as const, open: null }))
-  await opening
-  await publishFiles($)
-  await refreshGit($)
 }
 
 /** Shows (or hides) one file's diff: Claude's own edit lines, or git's diff against the last commit. */
@@ -1075,13 +1107,13 @@ async function pruneCards($: EngineInterface): Promise<void> {
   const cutoff = (await $.clock.now()) - CARD_KEEP_MS
   const sessions = new Map<string, { paths: string[]; isOld: boolean }>()
   for (const f of entries) {
-    const m = f.kind === 'file' ? CARD_FILE.exec(f.name) : null
-    if (!m || m[1] === me?.id) continue
-    const s = sessions.get(m[1]) ?? { paths: [], isOld: true }
+    const id = f.kind === 'file' ? CARD_FILE.exec(f.name)?.[1] : undefined
+    if (id === undefined || id === me?.id) continue
+    const s = sessions.get(id) ?? { paths: [], isOld: true }
     // mtimeMs 0 is an unknown age: keep.
     s.isOld &&= f.mtimeMs > 0 && f.mtimeMs < cutoff
     s.paths.push(`${dir}/${f.name}`)
-    sessions.set(m[1], s)
+    sessions.set(id, s)
   }
   const paths = [...sessions.values()].filter(s => s.isOld).flatMap(s => s.paths)
   const isWindows = /^[A-Za-z]:/.test(dir)
@@ -1355,11 +1387,6 @@ function turnCard($: EngineInterface, r: TurnRecord, t: number, width: number, i
                 </Text>
               )
             })}
-            {isLatest && (
-              <Button key={`sb-turn-files-${r.id}`} plain onPress={() => void openFiles($)}>
-                <Text color={LINK}>{fileTotal > r.files.top.length ? `all ${fileTotal} with diffs ›` : 'diffs ›'}</Text>
-              </Button>
-            )}
           </Box>
         )}
         {r.toolTotal > 0 && (
@@ -1597,15 +1624,6 @@ function thisSession($: EngineInterface, l: Live, t: number, width: number, ui: 
           })}
         </Box>
       )}
-      <Box marginTop={1}>
-        <Button key="sb-files-open" plain onPress={() => void openFiles($)}>
-          <Text color={LINK}>
-            {l.turnFiles > 0
-              ? `✎ Files changed ${l.isWorking ? 'this' : 'last'} turn · ${l.turnFiles} ›`
-              : '✎ Files changed ›'}
-          </Text>
-        </Button>
-      </Box>
     </Box>
   )
 }
@@ -2012,16 +2030,6 @@ function liveStrip($: EngineInterface, columns: number, l: Live, running: number
       </Text>,
     )
   }
-  if (l.turnFiles > 0) {
-    const label = `✎ ${l.turnFiles} file${l.turnFiles === 1 ? '' : 's'} ›`
-    used += label.length + 5
-    tail.push(
-      sep('sb-live-s2'),
-      <Button key="sb-live-files" plain onPress={() => void openFiles($)}>
-        <Text color={LINK}>{label}</Text>
-      </Button>,
-    )
-  }
   // What it is on now, in the room left.
   const room = columns - used - 4
   if (l.showProgress && l.progress?.now && room > 8) {
@@ -2217,7 +2225,10 @@ export const register: Register = (on, options) => {
       me = { ...me, changedAt: prior.changedAt }
       restoredProgress = prior.progress
       restoredEdits = prior.edits ?? []
+      await restoreFiles($, id).catch(() => undefined)
     }
+    // Writes this session's tracking over whatever an earlier session kept.
+    void publishFiles($).catch(() => undefined)
     derive(at)
     isDirty = true
     await flush($)
@@ -2715,7 +2726,7 @@ export const register: Register = (on, options) => {
     const l = await read($, liveAtom)
     const running = l.agents.filter(x => x.status === 'running').length
     // This session's own row: only while it works, and only with something to say.
-    const hasLive = l.isWorking && ((l.showProgress && l.progress !== null) || running > 0 || l.turnFiles > 0)
+    const hasLive = l.isWorking && ((l.showProgress && l.progress !== null) || running > 0)
     const q = a.quiet ?? { working: 0, waiting: 0, idle: 0 }
     const quietN = q.working + q.waiting + q.idle
     // Shown whenever another session is open: alerts as pills, the rest as dim counts.
@@ -2797,17 +2808,6 @@ export const register: Register = (on, options) => {
     // Every item of the group touches the next (no gaps), like the current group's pills do.
     const groupItems = [...pills, ...quietItems]
     const bgEl = bgN > 0 && statusChip('sb-bg', COLOR.background, bgChipText(l.bgKinds, bgN, false, oldest))
-    // Files another live session edited too: the last chip of the others group; a press opens the files view.
-    const ov = a.overlap && a.overlap.files.length > 0 ? a.overlap : undefined
-    const overlapChip = (text: string) =>
-      ov && (
-        <Button key="sb-overlap" plain onPress={() => void openFiles($)}>
-          {statusChip('sb-overlap-chip', 'yellow', text)}
-        </Button>
-      )
-    const ovRest = ov ? ov.names.slice(2).reduce((sum, g) => sum + g.n, 0) : 0
-    const ovNames = ov ? [...ov.names.slice(0, 2).map(named), ...(ovRest > 0 ? [`+${ovRest}`] : [])].join(', ') : ''
-    const ovWhat = ov ? (ov.files.length === 1 ? baseName(ov.files[0]!.path) : `${ov.files.length} files`) : ''
     // A narrow terminal (a split pane): counts instead of folder names, so the row stays short instead of breaking
     // into one-letter stripes. The same two label chips and the same "│" as the wide row, the status as its glyph only.
     if (e.props.bodyColumns < 60) {
@@ -2827,7 +2827,6 @@ export const register: Register = (on, options) => {
               {quietItems}
             </Text>
           )}
-          {overlapChip(`⚠${ov?.files.length ?? 0}`)}
           <Text>{'  '}</Text>
           <Button key="sb-strip-open" plain onPress={() => $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })}>
             <Text color={LINK}>☰ All ›</Text>
@@ -2865,7 +2864,6 @@ export const register: Register = (on, options) => {
             {groupItems}
           </Text>
         )}
-        {overlapChip(`⚠ ${ovWhat} · ${ovNames}`)}
         <Text>   </Text>
         <Button key="sb-strip-open" plain onPress={() => $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })}>
           <Text color={LINK}>☰ All ›</Text>

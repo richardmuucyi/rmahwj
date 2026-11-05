@@ -71,6 +71,12 @@ export type AgentRow = {
 
 export type FileKind = 'added' | 'modified' | 'deleted' | 'renamed'
 
+/** A changed file as the session tracks it: its row, and Claude's own diff lines where Claude made the change. */
+export type KeptChange = FileRow & { hunks: string[] }
+
+/** A git status snapshot: the repository's top folder, HEAD, and each changed path's status code and line counts. */
+export type KeptSnap = { top: string; head: string; sigs: [string, { code: string; stat: string; from?: string }][] }
+
 /** One changed file, as the files view lists it. */
 export type FileRow = {
   key: string
@@ -207,6 +213,20 @@ declare module 'claude-code' {
       recap: { turnId: string } | null
       /** The context guard: the chip above the prompt and the Context tab. */
       guard: GuardView
+      /** This session's file tracking, kept here because a hot reload starts the module's own variables over: Claude's
+       *  edits with their diff lines, what only git saw, and the git snapshots both are compared against. `id` is the
+       *  session's, so a new session never takes over the files of the one before. null until the first save. */
+      filesKept: {
+        id: string
+        session: KeptChange[]
+        turn: KeptChange[]
+        gitSession: KeptChange[]
+        gitTurn: KeptChange[]
+        sessionBase?: KeptSnap
+        turnBase?: KeptSnap
+        /** Absolute path by file key, for asking git about a file. */
+        abs: [string, string][]
+      } | null
       /** The panel's tab, and the files view. */
       files: {
         view: 'board' | 'turns' | 'files' | 'context'

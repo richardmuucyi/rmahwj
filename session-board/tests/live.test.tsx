@@ -178,10 +178,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     repo.numstat = ['1\t1\tnotes/old.md', '2\t1\thooks/register.tsx', '0\t2\tgone.md']
     await clock.advance(5_000)
 
-    // The strip while it works: task bar, what it is on, subagents, files.
+    // The strip while it works: task bar, what it is on, subagents. No files link (removed in 0.31.3).
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
     const row = await band.find({ key: 'sb-live' })
-    expect(row?.text.replace(/\s+/g, ' ').trim()).toBe('▰▰▰▱▱▱▱▱▱▱ 1/3 Running tests │ ◈ Explore · haiku │ ✎ 2 files ›')
+    expect(row?.text.replace(/\s+/g, ' ').trim()).toBe('▰▰▰▱▱▱▱▱▱▱ 1/3 Running tests │ ◈ Explore · haiku')
+    expect(await band.find({ key: 'sb-live-files' })).toBeUndefined()
     expect(await band.find({ key: 'engine-own' })).toBeDefined()
     await band.unmount()
 
@@ -207,8 +208,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await band2.find({ key: 'sb-live' })).toBeUndefined()
     await band2.unmount()
 
+    // No "✎ Files changed ›" link at the panel's bottom (removed in 0.31.5): the Files tab is the way in.
+    expect(await pane.find({ key: 'sb-files-open' })).toBeUndefined()
+    expect(t.some(x => /Files changed/.test(x))).toBe(false)
     // The files view: Claude's edits plus what only git saw; old.md was dirty before the turn.
-    await pane.press({ key: 'sb-files-open' })
+    await pane.press({ key: 'sb-tab-files' })
     await clock.advance(1_000)
     t = await texts(pane)
     expect(t).toContain('+ src/new.ts +2 ■■■■■ ▸')
@@ -352,6 +356,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(t.some(x => /ASSUMED · 1/.test(x))).toBe(true)
     expect(t.some(x => /HIGH Jest v29 is the target/.test(x))).toBe(true)
     expect(t.some(x => /✓ answered/.test(x))).toBe(true)
+    // The card lists its files but has no "diffs ›" link (removed in 0.31.4): the Files tab is the way in.
+    expect(t.some(x => /FILES · 1/.test(x))).toBe(true)
+    expect(t.some(x => /diffs ›/.test(x))).toBe(false)
+    expect(await pane.find({ key: 'sb-turn-files-t1' })).toBeUndefined()
     // 📓 fills the prompt box with a journal-capture line; nothing is written to the vault.
     await pane.press({ key: 'sb-turn-journal-t1' })
     expect(box).toBe('done Fixed the login test')
@@ -411,11 +419,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.tool.call({ tool: 'Edit', file_path: '/home/me/vault/a.md', old_string: 'x', new_string: 'y' })
     await clock.advance(5_000)
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
-    expect((await band.find({ key: 'sb-live' }))?.text.replace(/\s+/g, ' ').trim()).toBe('▰▰▰▰▰▱▱▱▱▱ 1/2 Doing two │ ✎ 1 file ›')
-    await band.press({ key: 'sb-live-files' })
-    expect(openSawView.at(-1)).not.toBe('files')
+    expect((await band.find({ key: 'sb-live' }))?.text.replace(/\s+/g, ' ').trim()).toBe('▰▰▰▰▰▱▱▱▱▱ 1/2 Doing two')
+    expect(await band.find({ key: 'sb-live-files' })).toBeUndefined()
     await band.unmount()
     const pane = await $.ui.mount({ plugin: 'session-board', surface, component: 'Pane', requestId: 'session-board', props: PANE_PROPS })
+    await pane.press({ key: 'sb-tab-files' })
     const t = await texts(pane)
     expect(t).toContain('~ a.md +1 −1 ■■■■■ ▸')
     expect(t.some(x => /Not a git folder/.test(x))).toBe(true)
