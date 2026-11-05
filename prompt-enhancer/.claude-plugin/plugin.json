@@ -1,6 +1,6 @@
 {
   "name": "prompt-enhancer",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "'== <text>' or /grammar: checks only your grammar with one small Haiku call, puts the corrected text in an empty prompt box and shows what changed; nothing is sent to Claude. Switch it off in /config. Also ships two skills you call by name: /prompt-enhancer:enhance turns a request into one deeper prompt (with panel or grill), and /prompt-enhancer:goal-draft drafts a /goal or /loop. They replace the ++ modes removed in 0.14.0.",
   "types": "./types/index.d.ts",
   "author": {
