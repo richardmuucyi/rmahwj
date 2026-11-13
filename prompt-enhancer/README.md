@@ -1,10 +1,9 @@
 # prompt-enhancer
 
-A grammar check before you send, and two skills that sharpen a request before any work starts.
+Two skills that sharpen a request before any work starts. The `==` grammar check that was here until 0.16 is now its own mod, [`grammar-check`](../grammar-check).
 
 | You type | What happens |
 |---|---|
-| `== <text>` or `/grammar <text>` | One small Haiku call (about 1.4K tokens) checks only your grammar. The corrected text goes into an empty prompt box, with what changed shown beside it. Your text is never sent to Claude. Switch it off in `/config` |
 | `/prompt-enhancer:enhance <request>` | Claude asks about the gaps that would change the result, says what a top professional would add, then writes one deeper prompt and asks "Run it now?" |
 | `/prompt-enhancer:goal-draft <request>` | Claude drafts a `/goal` condition with a turn cap, or a `/loop` command, ready to copy |
 
@@ -14,7 +13,7 @@ The two skills are user-invoked: Claude never starts them on its own, only when 
 
 1. **Gaps.** Up to four questions, multiple choice where it can, about what would change the result: the goal, the scope, the limits, how you will know it is done. It skips what you already said.
 2. **Deeper.** Four short lines: what a top professional would do that you did not ask for (`pro`), the raw material they would start from (`raw`), the methods and tools by name (`methods`), and what other than you or Claude would show the result is right (`proof`). It names only paths and commands it has checked; anything else is marked "(unchecked)".
-3. **One prompt.** Your request word for word, with the raw material, methods and proof added as steps. The same deliverable and about the same amount of work: no new reports, tables or extra outputs.
+3. **One prompt.** Your request word for word, with the raw material, methods and proof added as steps. The same deliverable and about the same amount of work: no new reports, tables or extra outputs. It carries one "Done when:" line, a short task list with a check per task when the work has several steps, and a line that asks for each check's real output.
 4. **Run it now?** Run it, edit it first, or stop.
 
 Two words can go before the request, in either order:
@@ -34,6 +33,10 @@ It reads your request as a goal ("keep working until X holds", or a one-off "che
 - **Loop:** one `/loop` line under 600 characters, self-paced unless the work is on a clock, safe to repeat, with a stop condition and "never push, delete or send" unless you asked for it. Work that waits for a log line is pointed to a Monitor, and work that must run with the laptop off is pointed to `/schedule`.
 
 Claude cannot type `/goal` or `/loop` for you: copy the block it gives and send it.
+
+## Moving from 0.16
+
+The `==` grammar check and `/grammar` left this plugin in 0.17.0. Install [`grammar-check`](../grammar-check) to keep them: `/plugin install grammar-check@rmahwj`.
 
 ## Moving from 0.13 or earlier
 
@@ -58,8 +61,4 @@ The old card that counted the critic subagents after the work is gone with the m
 
 ## Tests
 
-```
-claude plugin test prompt-enhancer
-```
-
-They cover the grammar check. The two skills are prompts with no tests of their own.
+The two skills are prompts with no tests of their own. The grammar check's tests moved with it to `grammar-check`.

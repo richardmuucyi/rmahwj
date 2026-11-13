@@ -18,6 +18,10 @@
       "source": "./diagram-skills"
     },
     {
+      "name": "grammar-check",
+      "source": "./grammar-check"
+    },
+    {
       "name": "html-artefact",
       "source": "./html-artefact"
     },
