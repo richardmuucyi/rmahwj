@@ -168,36 +168,17 @@ look at a magnified crop; keep `svg_check` for the question it is actually good 
 
 ### A6. When tracing is actually the answer
 
-Almost never, for anything a company still publishes. Here is the cost, measured on one mark
-where both routes were available — the same artwork, fetched versus traced from a 1200px PNG:
-
-| | bytes | paths | gradient stops |
-|---|---|---|---|
-| fetched from the vendor | 3,436 | 6 | 17 |
-| traced from the raster | 386,587 | 280 | 0 |
-
-**112x the size, 47x the paths, and no gradients at all** — the tracer approximates smooth colour
-ramps as hundreds of flat bands, which is plainly visible at 5x zoom. It still only scored CLOSE against the real vector,
-never MATCH. A trace cannot recover curves the tracer never saw.
-
-So trace when the artwork genuinely has no published vector — a defunct brand, a scan, a client's
-own sketch, a screenshot of something dead:
+Almost never, for anything a company still publishes: a trace of a gradient mark came out 112x the size of the vendor's file and
+never scored MATCH. Trace only when the artwork has no published vector (a defunct brand, a scan, a client's own sketch):
 
 ```bash
 python scripts/svg_trace.py sketch.png --out mark.svg --mono     # flat/line art
 python scripts/svg_trace.py logo.png  --out mark.svg --colors 8  # colour art
 ```
 
-It reports fidelity against the source raster rather than assuming a good result, and tells you
-when the trace is too poor to ship. Two things it cannot fix: an anti-aliased low-resolution
-source becomes mush, and a traced gradient stays banded no matter the settings. If the result
-matters, the answer is to look harder for real vector artwork, not to tune the tracer.
-
-**But read that 112x penalty correctly — it is a GRADIENT problem, not a tracing problem.** The
-tracer blew up because it had to approximate smooth colour ramps as hundreds of flat bands. Give
-it genuinely flat two-colour art and it behaves completely differently: the same tool traced a
-flat two-tone roundel into a **single path**, and the optimised file verified at mean delta 0.000
-against its source. That distinction is what makes B4 below viable.
+It reports fidelity against the source and says when the trace is too poor to ship. The penalty is a **gradient** problem: flat
+two-colour art traces cleanly, which is what makes B4 work. If the result matters, look harder for real vector artwork instead of
+tuning the tracer. The measurements: `references/tracing.md`.
 
 ---
 
@@ -235,46 +216,17 @@ work, not taste:
 
 ### B0. When there is nobody to ask
 
-You will sometimes run where no human can answer — a subagent, a scheduled job, a batch. Do
-not stall, and do not pretend a default was a decision. Write the questions you would have
-asked into your notes under a clear heading, state the assumption you are proceeding on for
-each, and deliver anyway. A delivered artefact plus four honest open questions is useful; a
-blocked task is not. When a human *is* present, ask — the whole point of B1 is that some
-answers change the drawing rather than refine it.
+In a headless run (a subagent, a scheduled job, a batch) do not stall, and do not pretend a default was a decision. Write the
+questions you would have asked into your notes, state the assumption you proceed on for each, and deliver anyway.
 
 ### B1. Decide what actually needs asking
 
-Ask only where a wrong guess wastes real work, and ask **once**, batched. These usually
-qualify, because they change the artwork rather than refine it:
-
-- **Where it will be used, and how small it will get.** A 16px favicon and a hero mark are
-  different drawings, not one drawing scaled.
-- **Colour commitment.** Mono and recolourable by the consumer (`currentColor`), or fixed
-  brand colours? That changes the file's structure, not just its fills.
-- **Style register**, when the brief is open — "an icon of a fox" could be geometric flat,
-  single-weight line, or filled silhouette, and they share no geometry.
-
-These usually do *not* qualify — decide, and state the assumption in one line: canvas size,
-exact padding, id naming, whether to include `<title>`. If the user gave a reference image or
-named a style, infer from it rather than re-asking.
-
-Two failure modes to avoid, in both directions. **Asking what you could check** wastes the
-user's turn — never ask whether something is legible at 16px, whether a colour has contrast, or
-whether two variants are the same shape; those are measurements, and you have the scripts.
-**Not asking what only they know** wastes the whole drawing — the business name, who it is for,
-where it will physically appear. If you cannot name what a question would change about the
-artwork, it is not worth asking.
-
-**When a question is unanswerable and would change the geometry, build both answers.** Style
-register is the usual one. Guessing wastes the drawing and asking is impossible in a headless
-run, so finish two genuine directions and let the client pick. That is cheaper than a wrong
-single direction and it makes the choice concrete instead of abstract.
-
-**Some things you cannot settle for them, and should say so rather than imply otherwise.**
-Trademark clearance needs their real name and jurisdiction. And whether a silhouette reads as
-intended — one run built an arch-on-plinth mark and flagged that it wanted a few naive viewers
-asked whether they saw a window or a headstone. No script answers that; naming it is the
-honest move.
+Ask **once**, batched, and only what changes the artwork: where it will be used and how small it gets, the colour commitment
+(`currentColor` or fixed brand colours), and the style register when the brief is open. Decide the rest and state the assumption in
+one line (canvas size, padding, id naming, `<title>`). If the user gave a reference image or named a style, infer from it and do not
+re-ask. Do ask what only they know: the business name, who it is for, where it will physically appear. Never ask what a script can measure (legibility at 16px, contrast, whether two
+variants match). When a question cannot be answered and would change the geometry, build both answers. Say plainly what you cannot
+settle for them: trademark clearance, and whether a silhouette reads as intended. The reasoning and examples: `references/what-to-ask.md`.
 
 ### B2. Construct
 
@@ -342,138 +294,35 @@ common, most fixable reason original work reads as cheap.
 
 ### B4. Generate, then vectorise — the route for figurative marks
 
-Hand-authoring Bezier coordinates works for geometric marks and icons. For **figurative**
-artwork — a face, a figure, anything with anatomy — it is a poor method, because you cannot see
-what you are drawing until you render it, and each fix breaks something else.
-
-In one real case eight hand-typed drafts of a figure peaked at 3.9 transitions/row against
-references at 5.4 and 7.4 and were rejected on sight; one generation plus a trace scored 7.5 and
-cleared both. If you have started typing path data by hand and two or three drafts have not
-converged, stop — the method is wrong, not the effort.
-
-**This is not the only route that works.** In a head-to-head, parametric authoring converged as well (see the Lane B gate above); it costs
-about 30% more and buys native geometry and free provenance. Choose deliberately rather than
-assuming generation is always right.
-
-The route is one command once you have a generation you like:
+For figurative artwork (a face, a figure, anything with anatomy), do not hand-type path data. If two or three hand-typed drafts
+have not converged, stop: the method is wrong, not the effort. Parametric authoring is the other route that works (the Lane B gate
+above). The route is one command once you have a generation you like:
 
 ```bash
 python scripts/svg_vectorise.py generated.png --out mark.svg --ink "#1A3566" --square 800
 ```
 
-It posterises, traces, recolours, optimises and places, and it refuses to hand you a broken
-file. Three gates, each aimed at something a mean score cannot see:
-
-- **Flatness** — refuses a source that is not genuinely two-tone, because tracing gradients is
-  what produces huge banded files. The gradient mark that established the 112x penalty measures
-  52% mid-tone here and is rejected outright.
-- **Blob count** — counts distinct ink shapes before and after. This is the one that matters:
-  discarding small blobs is *literally* what the speckle filter does, and on the real failure it
-  reads 18 -> 8. A tile-grid check was tried first and missed it, because a face's features are
-  a few percent of one tile, under the antialiasing noise elsewhere in the mark.
-- **Worst tile** — a second net for gross regional differences.
-
-The generation step is still yours: use any image generator you have, or ask the user for a
-flat two-colour PNG. Either way, ask for **absolutely flat colours, exactly two, no gradients,
-no shading, no texture, no drop shadow, hard edges**. That constraint is the whole reason the
-trace comes out clean rather than banded.
-
-Be straight with the client about what they are getting. The geometry is looser than hand-drawn
-work and the files are an order of magnitude larger (tens of KB, not single-digit). And the base
-was machine-generated, which is a real provenance question if the mark becomes a brand — say so
-rather than letting them assume you drew it.
+It refuses a broken file (three gates: flatness, blob count, worst tile). For the generation, ask for **absolutely flat colours,
+exactly two, no gradients, no shading, no texture, no drop shadow, hard edges**. Tell the client what they are getting: looser
+geometry, files of tens of KB, and a machine-generated base, which is a provenance question for a brand.
+The gates and the measured case: `references/generate-then-vectorise.md`.
 
 ---
 
 ## Lane C — dense illustrated scenes
 
-For scenes whose job is to inspire through density and rich detail: floating islands, isometric
-towns and harbours, machines, fantasy cities. Build them **by script, never by typed coordinates**:
-a dense scene is hundreds of shaded faces, and only a generator you re-render after every change
-converges. Read `references/dense-scenes.md` first — it holds the ten craft lenses, each with the
-ideas it gives while designing, the check it runs while reviewing, and the number or failure that
-earned it.
+For scenes whose job is to inspire through density and rich detail: floating islands, isometric towns and harbours, machines, fantasy
+cities. Build them **by script, never by typed coordinates**, and render after every change.
 
-### C1. Pick the reference and the route
+**Before you start a scene, read `references/dense-scenes-steps.md` (the steps below in full) and `references/dense-scenes.md` (the ten
+craft lenses).** The steps in one line each:
 
-Fetch one or two **dense references** (the contest set in `references/dense-scenes.md` scores 12–33
-on `svg_quality.py`; or one the client names — then it is the acceptance gate, as in B3). Include
-one on the route you will draw: a flat-route scene judged only against a layered painting gets
-asked for sheen it must not have. Pick the subject reference by what it shares with your subject:
-floating islands and cities, the 1.0 floating island; castles, mountains and climbing towns, the 1.3
-castle journey; machines and vehicles, the 1.3 disco machine or isometric truck; forests and nature,
-the 1.3 sunset forest or 1.2 jungle island. The flat reference is the 1.3 isometric truck. Decide the
-density route out loud: **line and pattern** (few gradients, repeated linework) or **layered painting**
-(many stacked translucent light and shadow shapes). They share no technique.
-
-### C2. Plan the composition in words
-
-Before any code: the hero mass, one big foreground anchor, the connective tissue that makes the large
-parts one machine, the curved forms that break box monotony, the negative-space diagonal, and the
-small life (a turning fan, falling water). Ask the client only what changes the drawing (B1 rules
-apply): the subject, the mood, where it will be seen.
-
-### C3. Build with `scripts/iso_scene.py`, starting from the worked example
-
-**Read `examples/tea_village.py` first.** It is a finished scene at the designer finish (critics: 5.5/10
-against an 8.5–9 reference, up from 4), and its docstring says which Lens 10 rules it shows and which
-it does not.
-Copy its structure, not its subject: a new subject needs its own buildings and props, but the light,
-the rock, the masses, the clouds, the haze, the leading line and the draw order carry over.
-
-`Iso` gives the projection, culled and shaded faces with registered gradients and painted light,
-boxes with rim light, roofs, low-poly bodies, tube and hangar strips, end caps, upright cylinders and
-in-plane detail rectangles; `Painter` sorts by depth. Run `python scripts/iso_scene.py --demo out.svg`
-once to see it work. Write the scene's own generator next to its output, import the toolkit, and
-**render after every change** — look at the whole frame and at 2.5× crops. Import it without
-leaving bytecode in the skill folder: set `sys.dont_write_bytecode = True` before
-`sys.path.insert(0, <skill>/scripts)` and `import iso_scene`. Beyond solid geometry the toolkit now
-draws the designer-finish pieces: `hip_roof()` (lit-rim roofs with lantern underglow),
-`mass_row()` (any repeated row, such as bushes, crates or reeds, as one scalloped three-tone mass),
-`cel_cloud()`, `haze()`, `leading_line()`, `cast_shadow()` with `ground_clip()`, `columns()`,
-`curved_tone()`, `crag()` (a mountain or rock spire with ledges, snow and cracks) with
-`facet_shadow()` (shadows projected onto its sloping facets), `shadow_union()` (overlapping shadows
-darken once), `value_budget()` (whites stepped down by distance from the focal object, so nothing
-outshines it), `battered_box()` (masonry that leans inward; windows drawn on it follow the lean),
-`subdivide()` (ledges and pilasters that break a large wall), `stairs()`, `figure()`, `truss()`,
-`frustum()` (a round, tapering tower: lighthouse, chimney, funnel) and `y_plane()`
-(flat art on a +y face, the twin of `x_plane()`). Inside `Iso.frame(swap=True)` every name is local:
-`on_face("y")` is the local +y face. Pass
-`Iso(prefix="x-")` when two scenes may share a page, so their ids do not collide. Anything else
-(glows, water, subject props) is yours to write, through `Iso.face()` so it shades like the rest.
-
-**Keep the default flat finish.** `Iso` lights from the screen's upper left and gives every face one
-crisp plane tone; `cast_shadow()` throws hard multiply shadows and `columns()` builds a rock
-underside that tapers to teeth. The older soft look (`finish="airbrush"`: light patches, sheen,
-continuous ramps) is what a tester called "student work instead of designer master". Lens 10 lists
-what moved the scene from student to designer.
-
-### C4. Review lens by lens
-
-Run the review pass at the end of `references/dense-scenes.md`, in order: route, tonal rhythm
-(`svg_quality.py --against` the reference; judge the number, not its verdict line: aim for about 12 on
-the painting route, while a flat-route dusk or night scene lands near 8–10 and a flat daytime scene
-near 11 (the sky-ship test: 11.4), and that is fine; below that, `scripts/scene_compare.py measure` shows which band is thin), frame fill (`measure` with the
-subject's group ids),
-one-machine integration, curved masses, painted light with its glare control, surface detail crops,
-hidden faces and depth order, animation alive (`measure` again), then the Lens 10 finish checklist. Fix and re-render
-until each passes.
-
-Then run `python scripts/finish_check.py scene.svg --route flat` (or `lines` / `painting`, per Lens 1).
-It fails on the cheap tells of student work: airbrush overlays, see-through grey shadows, hairline
-detail, blur, and clip paths that draw nothing. It must pass before any critic sees the scene.
-
-Then the critic rounds, with the brief in `references/critic-brief.md`, word for word. Each round
-uses a **fresh** agent: it scores reference and scene 1–10 for "could ship as commercial illustration"
-and ranks the faults left, each with crop evidence and a drawing fix. Open its crops and fix only the
-faults they show. Stop when the score plateaus. The author never grades its own scene.
-
-### C5. Show it beside the reference
-
-Deliver a side-by-side (reference | flat reference, for a flat-route scene | before | now) at the same size and 2.5× before/now crops of the
-areas you changed: `python scripts/scene_compare.py sheet out.png "REFERENCE=ref.svg" "BEFORE=a.svg"
-"NOW=b.svg"` and `scene_compare.py crops`. The numbers support the judgement; the client's eye on the side-by-side is the
-judgement.
+- **C1. Pick the reference and the route**: one or two dense references, and line-and-pattern or layered painting, decided out loud.
+- **C2. Plan the composition in words** before any code.
+- **C3. Build with `scripts/iso_scene.py`**, starting from `examples/tea_village.py`. Keep the default flat finish.
+- **C4. Review lens by lens**, then `python scripts/finish_check.py scene.svg --route flat` (or `lines` / `painting`) must pass, then
+  critic rounds with the brief in `references/critic-brief.md`, word for word, each with a fresh agent. The author never grades its own scene.
+- **C5. Show it beside the reference**: `scripts/scene_compare.py sheet` and `crops`.
 
 ---
 

@@ -91,17 +91,6 @@ function ago(ms: number): string {
   return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`
 }
 
-/** True when a drawing shows nothing (an empty box or blank text): such a tree only adds a blank row. */
-function isBlank(n: unknown): boolean {
-  if (n === null || n === undefined || n === false || n === true) return true
-  if (typeof n === 'string') return n.trim() === ''
-  if (typeof n === 'number') return false
-  if (Array.isArray(n)) return n.every(isBlank)
-  const el = n as { type?: unknown; children?: unknown[] }
-  if (el.type === 'Box' || el.type === 'Text') return (el.children ?? []).every(isBlank)
-  return false
-}
-
 /** Review order: high impact first, skipped ones last, then oldest first. */
 function queue(items: Assumption[]): Assumption[] {
   return items
@@ -282,12 +271,15 @@ export const register: Register = on => {
     return { result: `Logged as A${id}. Carry on; the user will send a correction if it is wrong.` }
   })
 
+  // Subagents' turns start and end inside the main turn: only the main loop says whether Claude is working.
   on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
     await update($, isWorking, () => true)
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
     await update($, isWorking, () => false)
     return next(e)
   })
@@ -381,18 +373,13 @@ export const register: Register = on => {
       </Box>
     )
 
-    const mine = (
+    // The band is one row per plugin, and this hook answers only this mod's row: other mods' strips are rows of
+    // their own. What `next(e)` holds for this row is the engine's own drawing, a node a hook cannot look into,
+    // so the card stands in its place.
+    return (
       <Box key="as-card" flexDirection="column" borderStyle="round" borderColor={accent} paddingX={1}>
         {header}
         {body}
-      </Box>
-    )
-    // Keep whatever else is drawn above the prompt (other mods' strips) beneath this one.
-    const beneath = await next(e)
-    return (
-      <Box flexDirection="column">
-        {mine}
-        {!isBlank(beneath) && beneath}
       </Box>
     )
   })

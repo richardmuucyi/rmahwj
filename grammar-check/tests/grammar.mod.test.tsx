@@ -48,7 +48,7 @@ function rig($: Args[0], on: Args[1], replies: (Reply | Promise<Reply>)[], box0 
   })
 
   let mounted: Band | undefined
-  const band = async () => (mounted ??= await $.ui.mount({ plugin: 'prompt-enhancer', surface, component: 'AbovePrompt', props: BAND }))
+  const band = async () => (mounted ??= await $.ui.mount({ plugin: 'grammar-check', surface, component: 'AbovePrompt', props: BAND }))
   const card = async () => fold((await (await band()).find({ key: 'pe-grammar' }))?.text)
   const wait = () => new Promise<void>(r => setTimeout(r, 1))
   const until = async (cond: () => boolean | Promise<boolean>, what: string) => {

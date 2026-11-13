@@ -26,7 +26,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
       sent.push(e.text)
       return { text: e.text }
     })
-    // The engine's own drawing above the prompt: blank, so it is left out.
+    // The band is one row per plugin. This hook is the test's own row, drawn whatever the mod draws:
+    // the mod answers only its own row, so it can neither hide this one nor needs to keep it.
     on('ui.render', ($, e) => {
       const { Box } = $.ui.resolve(e)
       return <Box key="engine-own" />
@@ -54,7 +55,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(c.text).toContain('⚠ ASSUMPTION 1/3')
     expect(c.text).toContain('high impact')
     expect(c.text).toContain('Delete the old build folder first')
-    expect(await c.band.find({ key: 'engine-own' })).toBeUndefined()
+    // The other row stands beside the card, once: the mod's row holds the card alone.
+    expect((await c.band.findAll({ key: 'engine-own' })).length).toBe(1)
     await c.band.press({ key: 'as-card-right' })
     await c.band.unmount()
 
@@ -85,7 +87,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(closed).toEqual(['assumptions'])
     c = await card()
     expect(c.text).toBe('')
-    expect(await c.band.find({ key: 'engine-own' })).toBeDefined()
+    expect(await c.band.find({ key: 'as-card' })).toBeUndefined()
+    expect((await c.band.findAll({ key: 'engine-own' })).length).toBe(1)
     await c.band.unmount()
 
     // The panel: reviewed ones fold away; Clear keeps numbering going.

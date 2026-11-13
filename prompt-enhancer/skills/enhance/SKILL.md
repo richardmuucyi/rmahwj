@@ -1,6 +1,6 @@
 ---
 name: enhance
-description: "Turn my request into one deeper prompt: ask about the gaps that change the result, say what a top professional would add, add a panel of five experts on request, then write one prompt and ask \"run it now?\". User-invoked only: /enhance <request>; /enhance panel <request> adds five experts, /enhance grill <request> a full interview, and both words may be used. Moved from the prompt-enhancer mod's ++, ++deep, ++panel and grill modes (2026-10-31). NOT for a /goal or /loop (/goal-draft)."
+description: "Turn my request into one deeper prompt: ask about the gaps that change the result, say what a top professional would add, add a panel of five experts on request, then write one prompt, have a fresh agent read it back, and ask \"run it now?\". A small request is passed through; another skill's job is routed to it. User-invoked only: /enhance <request>; /enhance panel <request> adds five experts, /enhance grill <request> a full interview, and both words may be used. Moved from the prompt-enhancer mod's ++, ++deep, ++panel and grill modes (2026-10-31). NOT for a /goal or /loop (/goal-draft)."
 disable-model-invocation: true
 argument-hint: "[panel] [grill] <request>"
 ---
@@ -12,6 +12,17 @@ My request: $ARGUMENTS
 I want a deeper version of my request above, not a bigger one. Do not start the work until I say yes at the end. Do not search my private notes (daily notes, journal, personal areas) for facts about me, my family, health, money or relationships: ask me instead.
 
 **Panel and grill.** My request may start with the words `panel`, `grill` or both, in either order. Drop them from the request. `panel` runs step 3. `grill` runs grill mode: step 1 uses the interview below in place of its question limit, and step 4's word limit gives way to the trace rule.
+
+## 0. Size and route *(added 2026-11-13)*
+
+Before step 1, judge my request and say the result in one line. Do this once; it is not a step to deliberate on. You may take one quick look first (open the file the request names, or list a folder) to see that what it names is there.
+
+- **Small.** The work is one step I can check at a glance (one answer, one short text, one small edit, a rename, a lookup), and nothing in it is unclear in a way that would change the result. Reply "Small: run it as it is.", add at most one line that names a check worth making, and ask with AskUserQuestion: run it as typed (Recommended), enhance it anyway (then go on with step 1), or stop here. Skip steps 1 to 5 and write no deep block, prompt or goldfish block. A request that started with `panel` or `grill` is never small: I asked for the full pass.
+- **Another skill's job.** Route only when another skill does *this skill's* job better: it is made to plan, specify or draft the kind of request I typed, so enhancing here would only repeat it. Name the skill and say why in one line, then ask me with AskUserQuestion: use that skill (Recommended), enhance it here, or stop. Name only a skill you can see in this session's skill list, or one of the three below; for a skill I must type myself, give me the command to type and do not try to load it. Never route on a guess about a skill you have not seen.
+  - A skill that *does the work* (draws a diagram, builds a report, renders an image) is not a route, even when it covers the whole request. Go on with step 1, and name that skill in the prompt as the tool for its step ("use the d2-diagram skill for the render"). When two could fit a step, name the one whose description names the files or the output in my request.
+  - A `/goal` or a `/loop`: `/goal-draft`.
+  - Work that will take more than one session, or that must be resumed from a file (a spec, a plan with tasks to tick off): say so in one line, run step 1 first so the gaps are closed, then ask the route question with these options: type `/mattpocock-skills:to-spec` and after it `/mattpocock-skills:to-tickets` (Recommended), use `superpowers:writing-plans`, enhance it here, or stop. The first two are typed by me and never show in your skill list, so their absence there means nothing; they turn this conversation into a durable spec and tickets, which this skill does not write. Step 1's answers are their input, so list the settled answers in the reply.
+- **Otherwise** go on with step 1.
 
 ## 1. Gaps
 
@@ -46,6 +57,11 @@ Pick the five experts from different fields who would make this outstanding, inc
 
 Then rewrite my prompt to ask for exactly that. It starts with my request, word for word, and keeps the deliverable I asked for. Same deliverable and about the same amount of work: add the raw material, the methods and the proof as steps, add no new deliverables, and keep my own words where they work. Every step serves my one deliverable (finds its material, makes it, or checks it); a second result is a new deliverable even as a last step: a further report, an audit of something else, a new script. Add no new kind of output either: a table, score sheet, breakdown or analysis my request does not name is a new deliverable. The proof checks the result; its numbers are not added to what I get unless I asked for them. Anything you marked "(unchecked)" goes into the rewrite as a check-first step with a fallback ("first confirm X exists; if it does not, do Y instead"), never as a plain step that assumes it. Under 150 words, or 200 when you asked me questions first: the extra is only for my answers. In grill mode: No length limit: write as much as the result needs, and no more. One deliverable, and every line of the draft traces to my request or to a settled or assumed ledger line; add nothing they do not hold.
 
+In every mode the prompt also carries these three, outside the word limit *(added 2026-11-13: say what done is, give each task a check, ask for the output)*:
+- One done-when line: "Done when: <a result that output can show: an exit code, a count, a quote, a known answer>". Use my own words for it where I gave them; never a taste word ("looks good", "polished"). With a panel, the reader done-when lines below stand in for it.
+- A task list, only when the work has more than one step that can fail by itself (a change across several files, a migration, a pipeline). At most 5 tasks, one line each, in the order they run: "Task N: <what>; check: <a command, a count or a known answer that shows this task alone is right>". A check uses what already exists (a test that is there, a command, a count); it adds a test file only when my request asks for tests. Work that is one step (one answer, one short text, one small edit) gets no task list: do not invent tasks to fill one.
+- One line that asks for the proof: "Show each check's real output (the command and what it printed), not a summary of it." The output goes in the reply; it is not added to the deliverable.
+
 With a panel, the prompt also carries these, past the word limit. The panel changes how the work is done, not what it is.
 - Every expert's methods as steps, the critics' too: their methods, not their voices.
 - Every reader of the result: each person, agent, team or later maintainer my request implies, not only the one that can be tested here. For each, write one done-when line that quotes, in double quotes, the words of my request that say what that reader needs, then a test that checks those very words, and who runs it ("run by …"). A person's test is run by a person (me, or someone I name), and a stated limit never replaces that; when none can run it, still list it and say who must. At most 6 done-when lines: when two readers need the same thing (me asking and me reading), merge them into one line that quotes both. Every line tests the one deliverable my request asks for; a reader whose test needs a second deliverable is out of scope. Each done-when line starts "Done when, <reader> ("<my words about that reader>"):", or "Done when, <reader> (implied):" for a reader my request implies but never mentions. In those lines "the owner" is me and "Claude" is a fresh subagent, never whoever does the work. The format only:
@@ -58,6 +74,23 @@ With a panel, the prompt also carries these, past the word limit. The panel chan
 The prompt's last line is this, word for word:
 Make only the one deliverable named. No extra files, tests or reports unless my request asks.
 
+## 4b. Goldfish check *(added 2026-11-13)*
+
+Before you show me the prompt, have a reader with no memory of this conversation read it. You wrote the prompt, so you cannot see what it leaves out.
+
+Give the prompt, and nothing else, to a fresh subagent (Agent tool, `subagent_type: "Explore"`): not this conversation, not the ledger, not the deep answers, not your notes. It may open the files the prompt names. Ask it for three short things, and tell it to do none of the work:
+1. in two sentences, what it would make, and how it would know it is done;
+2. every guess it had to make to answer 1, one line each;
+3. any line of the prompt it could not act on.
+
+Then use what it returns:
+- If its say-back is not what I asked for, fix the prompt.
+- For each guess whose answer would change the result: if a file answers it, read the file and put the answer in the prompt; if only I know it, ask me now with AskUserQuestion, before the reply of step 5, and put my answer in the prompt. Drop a guess that would not change the result.
+- For each line it could not act on: fix the prompt so it can, or keep the line in the goldfish block when it cannot be fixed here.
+- What these fixes add to the prompt is outside step 4's word limit.
+- Run the check once. Do not send the fixed prompt back for a second round.
+- If you have no subagent tool, or the call fails, write "goldfish: could not run" and why. Never write a say-back or a guess list yourself.
+
 ## 5. Reply, then run it now?
 
 Reply with the four answers in a fenced code block tagged deep, one line each:
@@ -65,6 +98,9 @@ pro: …
 raw: …
 methods: …
 proof: …
-then the panel list if step 3 ran, then the prompt alone in a fenced code block tagged prompt (four backticks when it holds a code block of its own).
+then the panel list if step 3 ran, then the prompt alone in a fenced code block tagged prompt (four backticks when it holds a code block of its own), then the goldfish result in a fenced code block tagged goldfish, three lines:
+say-back: <its answer to 1, word for word, even when longer than two sentences>
+guesses: <how many it made>; fixed in the prompt: <n>; asked me: <n>; dropped: <n>
+could not act on: <its lines that are still open, or "nothing">; fixed: <n>
 
 Then ask "Run it now?" with AskUserQuestion: run it now (Recommended), edit it first, or stop here. On "run it now", do the work the prompt asks for, as written. On "edit it first", take my changes and ask again.

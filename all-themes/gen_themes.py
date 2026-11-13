@@ -5,7 +5,14 @@ Writes themes/, .claude-plugin/plugin.json and README.md next to this file
 import json, os, shutil, sys
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
-VERSION = '1.3.0'
+def current_version():
+    """plugin.json holds the version: the one in OUT, else the one beside this file. Bump it there, never here."""
+    for folder in (OUT, os.path.dirname(os.path.abspath(__file__))):
+        try:
+            with open(f'{folder}/.claude-plugin/plugin.json', encoding='utf-8') as f: return json.load(f)['version']
+        except (OSError, KeyError, ValueError): pass
+    raise SystemExit('gen_themes: no .claude-plugin/plugin.json with a version to keep')
+VERSION = current_version()
 
 def hx(c): c = c.lstrip('#'); return tuple(int(c[i:i+2], 16) for i in (0, 2, 4))
 def rgb(t): return f"rgb({t[0]},{t[1]},{t[2]})"

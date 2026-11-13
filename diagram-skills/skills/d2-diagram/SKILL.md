@@ -216,8 +216,7 @@ python scripts/render.py <name>.d2 -o <name>.svg
 
 The script exists to make three mistakes impossible: losing d2's exit status to a pipe,
 missing that a multi-board diagram wrote a *directory* instead of a file, and failing to
-find `d2` when it is not on PATH. Flags it understands: `--layout`, `--theme`,
-`--dark-theme`, `--sketch`, `--pad`, `--center`, `--scale`, `--animate-interval`; anything
+find `d2` when it is not on PATH. `--help` lists the flags it understands; anything
 else is passed to `d2` untouched.
 
 Honour explicit requests — `--layout=elk`, `--theme=300`, sketch mode. Absent a request,

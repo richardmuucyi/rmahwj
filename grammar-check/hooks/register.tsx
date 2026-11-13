@@ -8,12 +8,10 @@ import type { Check, Seg } from './grammar'
 // The `==` grammar check (and /grammar): one small Haiku call that checks only your
 // grammar, and it can be switched off in /config. The prompt is never sent to Claude,
 // so the correction never enters the conversation.
-// 0.14.0 (the owner's call, 2026-10-31): the ++ modes moved out of the mod into two
-// user-invoked skills, /enhance (++, ++deep, ++panel and grill) and /goal-draft
-// (++goal and ++loop). Each old instruction sentence is in one of them or named as
-// dropped: .claude/mods/_evals/prompt-enhancer/skill_coverage.py checks that.
+// This was part of the prompt-enhancer mod until 0.16.1; it became a mod of its own on
+// 2026-11-13 (the owner's call), and prompt-enhancer now ships only its two skills.
 
-const grammar = atom({ plugin: 'prompt-enhancer', key: 'grammar' } as const, null)
+const grammar = atom({ plugin: 'grammar-check', key: 'grammar' } as const, null)
 
 /** True when a drawing shows nothing (an empty box or blank text): such a tree only adds a blank row. */
 function isBlank(n: unknown): boolean {
@@ -112,7 +110,7 @@ export const register: Register = (on, options) => {
   // "== …": the grammar check. Every other prompt goes to Claude untouched.
   on('prompt.submit', async ($, e, next) => {
     const isYours =
-      e.origin.kind === 'composer' || (e.origin.kind === 'plugin' && e.origin.name === 'prompt-enhancer')
+      e.origin.kind === 'composer' || (e.origin.kind === 'plugin' && e.origin.name === 'grammar-check')
     if (!isYours) return next(e)
     const text = e.text.trimStart()
     // "== …": check the grammar only. The prompt is consumed here and never reaches Claude.

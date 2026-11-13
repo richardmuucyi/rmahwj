@@ -29,7 +29,7 @@ export type GrammarCard =
 
 declare module 'claude-code' {
   interface PluginState {
-    'prompt-enhancer': {
+    'grammar-check': {
       /** The `==` grammar card; null for none. */
       grammar: GrammarCard | null
     }

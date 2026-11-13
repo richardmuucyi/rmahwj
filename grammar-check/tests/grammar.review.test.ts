@@ -164,3 +164,15 @@ test('a hunk with no matching reason is still shown, with a plain category', () 
   const r = review('go home', { corrected: 'Go home', fixes: [] })
   expect(rows(r)).toEqual([{ del: 'go', ins: 'Go', category: 'change', why: '', count: 1, applied: true }])
 })
+
+test('tips: a deletion the model listed but did not make is a tip; one it made is not', () => {
+  // Not made: "very" is still in the text, so the suggestion to drop it is shown.
+  const kept = review('this is very good', { corrected: 'This is very good', fixes: [fx('very', '', 'filler', 'Filler.', 'tip')] })
+  expect(kept.text).toBe('This is very good')
+  expect(kept.tips.map(t => t.before)).toEqual(['very'])
+
+  // Made: the word is gone, so there is nothing left to suggest.
+  const gone = review('this is very good', { corrected: 'This is good', fixes: [fx('very', '', 'filler', 'Filler.')] })
+  expect(gone.text.includes('very')).toBe(false)
+  expect(gone.tips.length).toBe(0)
+})

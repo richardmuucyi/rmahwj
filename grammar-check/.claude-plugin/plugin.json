@@ -1,0 +1,21 @@
+{
+  "name": "grammar-check",
+  "version": "0.1.0",
+  "description": "'== <text>' or /grammar: checks only your grammar with one small Haiku call, puts the corrected text in an empty prompt box and shows what changed; nothing is sent to Claude. Switch it off in /config.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Richard"
+  },
+  "userConfig": {
+    "grammar": {
+      "type": "string",
+      "title": "Grammar check (== and /grammar)",
+      "description": "on: '== <text>' and /grammar check only your grammar with one small Haiku call (about 1.4K tokens), and never send your text to Claude. off: '==' is sent to Claude as you typed it, and this mod makes no model call at all.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    }
+  }
+}

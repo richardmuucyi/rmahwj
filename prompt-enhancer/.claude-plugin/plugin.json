@@ -1,21 +1,8 @@
 {
   "name": "prompt-enhancer",
-  "version": "0.16.0",
-  "description": "'== <text>' or /grammar: checks only your grammar with one small Haiku call, puts the corrected text in an empty prompt box and shows what changed; nothing is sent to Claude. Switch it off in /config. Also ships two skills you call by name: /prompt-enhancer:enhance turns a request into one deeper prompt (with panel or grill), and /prompt-enhancer:goal-draft drafts a /goal or /loop. They replace the ++ modes removed in 0.14.0.",
-  "types": "./types/index.d.ts",
+  "version": "0.17.1",
+  "description": "Two skills you call by name: /prompt-enhancer:enhance turns a request into one deeper prompt (with panel or grill), and /prompt-enhancer:goal-draft drafts a /goal or /loop. The '==' grammar check moved to its own mod, grammar-check, in 0.17.0.",
   "author": {
     "name": "Richard"
-  },
-  "userConfig": {
-    "grammar": {
-      "type": "string",
-      "title": "Grammar check (== and /grammar)",
-      "description": "on: '== <text>' and /grammar check only your grammar with one small Haiku call (about 1.4K tokens), and never send your text to Claude. off: '==' is sent to Claude as you typed it, and this mod makes no model call at all.",
-      "options": [
-        "on",
-        "off"
-      ],
-      "default": "on"
-    }
   }
 }

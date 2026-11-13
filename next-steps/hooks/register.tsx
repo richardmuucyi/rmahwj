@@ -281,6 +281,8 @@ export const register: Register = (on, options) => {
 
   // Turn over: ask the fork, detached, so the turn's completion never waits on it.
   on('turn.complete', async ($, e, next) => {
+    // A subagent's turn ends here too, mid-turn: only the main loop's answer earns a fork.
+    if (e.agentId !== undefined) return next(e)
     const result = await next(e)
     if (e.reason !== 'answer' || e.answer.trim().length < minTurnChars) return result
     const turnId = e.turnId
@@ -294,7 +296,7 @@ export const register: Register = (on, options) => {
         const commands = await $.command.list().catch(() => null)
         const known = commands === null ? null : new Set(commands.map(command => command.name))
         const skills = suggestsSkills && commands !== null ? skillList(commands) : ''
-        const reply = await $.model.fork({ prompt: forkPrompt(skills) })
+        const reply = await $.model.fork({ prompt: forkPrompt(skills), effort: 'low' })
         items = reply.isAnswered ? parseSuggestions(reply.text, known) : []
       } catch (error) {
         $.ui.log(`fork failed: ${String(error)}`)

@@ -283,7 +283,9 @@ export function review(original: string, check: Check): Review {
   flushSame(a.length)
   text = text.replace(/\s+$/, '') + /\s*$/.exec(original)![0]
 
-  const tips = check.fixes.filter((f, idx) => !matched.has(idx) && f.before !== f.after && !text.includes(f.after))
+  // A deletion has nothing to look for in the text (''.includes is always true): it is still open while its words are there.
+  const isOpen = (f: Fix) => (f.after === '' ? text.includes(f.before) : !text.includes(f.after))
+  const tips = check.fixes.filter((f, idx) => !matched.has(idx) && f.before !== f.after && isOpen(f))
   return {
     original,
     text,
