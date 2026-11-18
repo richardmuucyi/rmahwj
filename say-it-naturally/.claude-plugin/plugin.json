@@ -1,0 +1,6 @@
+{
+  "name": "say-it-naturally",
+  "version": "0.1.0",
+  "description": "A skill that polishes what you are about to say out loud (a meeting or stand-up update, a demo, an idea to explain) so it sounds natural but stays in your own words: a polished version, a short version, your phrases with the fix and why, the questions the room may ask, then a retry so you can practise.",
+  "author": { "name": "Richard" }
+}
