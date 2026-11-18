@@ -38,6 +38,10 @@
       "source": "./prompt-enhancer"
     },
     {
+      "name": "say-it-naturally",
+      "source": "./say-it-naturally"
+    },
+    {
       "name": "session-board",
       "source": "./session-board"
     },
