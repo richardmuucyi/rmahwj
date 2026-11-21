@@ -1,6 +1,6 @@
 {
   "name": "skill-authoring",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Three skills for building and improving skills: turn an EPUB into a skill or audit a SKILL.md's structure, uplift an existing skill against current best practice with verified research, and a gated loop that lets a skill learn from its own runs.",
   "author": { "name": "Richard" }
 }

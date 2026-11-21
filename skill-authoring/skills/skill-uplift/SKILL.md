@@ -16,7 +16,7 @@ This skill builds the research and proposes changes. It never spends tokens or e
 
 ## Do not invoke when
 
-The user wants to create a skill from nothing — use `skill-creator`. The user only wants a structural audit with no web research — use `ebook-to-skill`'s audit mode.
+The user wants to create a skill from nothing — use `skill-creator`. The user only wants a structural audit with no web research — suggest `/ebook-to-skill` (its audit mode; user-invoked).
 
 ## Workflow
 
@@ -85,7 +85,7 @@ Then propose the edits as a plan/diff for the user to approve. **Do not apply au
 ## What this skill is not
 
 - **Creating a new skill** — use `skill-creator`.
-- **Structural-only audit without web research** — use `ebook-to-skill`'s audit mode.
+- **Structural-only audit without web research** — suggest `/ebook-to-skill` (its audit mode; user-invoked).
 - **Improving a CLAUDE.md** — use `claude-md-improver`.
 - **Feeding a mid-run discovery back into a skill** — use `self-improving-skills`.
 - **Description tuning** — use `shrink-skill-desc` (empirical trigger-eval loop; uplift edits tend to inflate the description).

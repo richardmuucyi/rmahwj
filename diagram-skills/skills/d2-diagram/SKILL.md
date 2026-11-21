@@ -395,7 +395,7 @@ replacing any of them with a one-liner.
 | `scripts/advise.py` | stages 1–2: propose type, layout, themes, vectors | themes read live from the binary; a local logo folder (`--icons-dir`); the hosted-icon 403 problem |
 | `scripts/render.py` | stage 4: compile, `--check` the inventory | exit status lost to pipes; multi-board writing a directory; d2 not on PATH; **relative imports resolving against the cwd** |
 | `scripts/visual_review.py` | stage 5: measure geometry in a browser | blocked `file:`; the false `goto` timeout; the npm `.cmd` shim; single-line JS |
-| `scripts/rasterize.py` | PNG, since d2's own raster export is broken here | natural-size wrapping so the browser cannot scale-to-fit |
+| `scripts/rasterize.py` | PNG with colour-scheme control (d2's own raster export failed on v0.7.1) | natural-size wrapping so the browser cannot scale-to-fit |
 | `scripts/quality.py` | scores a `.d2` against eleven criteria — label length, canvas, style centralisation, title, **legend honesty**, container labels louder than their nodes | that relative imports resolve against the cwd, so it compiles from the source's own directory |
 | `scripts/from_mermaid.py` | mechanical mermaid → D2 conversion | the `alt`/`else` rule that decides whether the conversion is a win at all |
 | `scripts/gallery.py` | renders every genre in `tests/all-types/` light and dark, checks each PNG's corner, writes contact sheets | that a change can break one genre while the one you looked at stays fine; a source with no dark theme gives a light "dark" PNG |
