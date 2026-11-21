@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Assumption, PastCorrection } from '../types'
+import type { Assumption, PastCorrection, SessionStats } from '../types'
 
 const PANE = 'assumptions'
 const TOOL = 'mcp__assumptions__log_assumption'
@@ -12,6 +12,8 @@ const isWorking = atom({ plugin: 'assumptions', key: 'isWorking' } as const, fal
 const nextId = atom({ plugin: 'assumptions', key: 'nextId' } as const, 1)
 const showReviewed = atom({ plugin: 'assumptions', key: 'showReviewed' } as const, false)
 const steps = atom({ plugin: 'assumptions', key: 'steps' } as const, 0)
+// Assumptions removed by Clear history: gone from view, still counted in this session's stats.
+const cleared = atom({ plugin: 'assumptions', key: 'cleared' } as const, [])
 
 // Set by session.start: this repo's corrections file, and the corrections read back from earlier sessions.
 let sessionId = ''
@@ -22,6 +24,9 @@ let past: PastCorrection[] = []
 let task = ''
 const PAST_SHOWN = 10
 const PAST_KEPT = 100
+// Per-session counts for a later usefulness review: never the assumption text.
+let statsFile = ''
+const STATS_KEPT = 1_000
 
 // After the last open assumption is reviewed, the panel closes after this pause.
 const CLOSE_DELAY_MS = 2_000
@@ -30,7 +35,8 @@ const GUIDANCE = `## Logging assumptions
 While you work, whenever you make a non-trivial assumption the user has not confirmed (about requirements, scope, file or folder locations, formats, naming, defaults, data, or which option they want), call the tool \`${TOOL}\` at once with that assumption in one short sentence, and a few words on why. Then keep working; do not stop to ask. The user reviews the assumptions as they come.
 - Set impact to "high" when a wrong guess would be costly to undo (deleting or overwriting data, architecture, money, anything sent to other people); otherwise leave it out.
 - Log one assumption per call, when you make it, not in a batch at the end.
-- Skip trivial or obvious choices, and anything the user already stated.
+- Log the assumption before the tool call that acts on it. Do not log a choice you have already carried out.
+- Skip trivial or obvious choices, and anything the user already stated. Do not log a default the user would not question, such as following the repo's existing style.
 - If a message arrives that says "Correction to assumption A<n>", follow it: revise the work that depended on that assumption, and say briefly what you changed.`
 
 function short(text: string, n = 60): string {
@@ -91,16 +97,63 @@ function ago(ms: number): string {
   return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`
 }
 
-/** Review order: high impact first, skipped ones last, then oldest first. */
+/** Review order: high impact first, then oldest first. */
 function queue(items: Assumption[]): Assumption[] {
   return items
     .filter(a => a.status === 'open')
-    .sort(
-      (x, y) =>
-        Number(y.impact === 'high') - Number(x.impact === 'high') ||
-        (x.skippedAt ?? 0) - (y.skippedAt ?? 0) ||
-        x.id - y.id,
-    )
+    .sort((x, y) => Number(y.impact === 'high') - Number(x.impact === 'high') || x.id - y.id)
+}
+
+/** The open ones Skip all would close: high-impact ones are never skipped in bulk. */
+function skippable(items: Assumption[]): Assumption[] {
+  return queue(items).filter(a => a.impact !== 'high')
+}
+
+/** Skip all shows only when it would close two or more. */
+const SKIP_ALL_MIN = 2
+
+/** Dismiss every open low-impact assumption; the high-impact ones stay on the card. */
+async function skipAll($: EngineInterface): Promise<void> {
+  await update($, list, all => all.map(a => (a.status === 'open' && a.impact !== 'high' ? { ...a, status: 'dismissed' as const } : a)))
+  await closeIfDone($)
+}
+
+function stats(items: Assumption[], at: number, session: string): SessionStats {
+  const n = (s: Assumption['status']) => items.filter(a => a.status === s).length
+  return {
+    at,
+    session,
+    repo,
+    logged: items.length,
+    right: n('right'),
+    wrong: n('wrong'),
+    skipped: n('dismissed'),
+    open: n('open'),
+    high: items.filter(a => a.impact === 'high').length,
+  }
+}
+
+/** Replace this session's line in the stats file, keeping every other session's. */
+async function writeStats($: EngineInterface, line: SessionStats): Promise<void> {
+  const old = await $.fs.read(statsFile).catch(() => '')
+  const others = old.split('\n').filter(l => {
+    if (l.trim() === '') return false
+    try {
+      return (JSON.parse(l) as SessionStats).session !== line.session
+    } catch {
+      return false
+    }
+  })
+  await $.fs.write(statsFile, `${[...others, JSON.stringify(line)].slice(-STATS_KEPT).join('\n')}\n`)
+}
+
+/** A correction typed into the prompt: the exact pre-filled form, or one whose quoted part was edited or dropped. */
+function typedCorrection(text: string): { id: number; fix: string } | undefined {
+  const m =
+    /^Correction to assumption A(\d+) \(".*"\): ([\s\S]+)$/.exec(text) ??
+    /^Correction to assumption A(\d+)\b[^\S\n]*(?:\(.*\))?[^\S\n]*:\s*([\s\S]+)$/.exec(text)
+  const fix = m?.[2]?.trim() ?? ''
+  return m === null || fix === '' ? undefined : { id: Number(m[1]), fix }
 }
 
 /** Mark one assumption reviewed; close the panel shortly after the last one. */
@@ -194,24 +247,36 @@ export const register: Register = on => {
         .then(r => (r.exitCode === 0 ? r.stdout.trim() : ''), () => '')
       repo = (top || root).replace(/\\/g, '/')
       file = `${home}/.claude/assumptions/${repo.replace(/[^A-Za-z0-9]/g, '-')}.jsonl`
+      statsFile = `${home}/.claude/assumptions/stats.jsonl`
       // Read once per start: the guidance section must stay the same for the whole thread.
       past = readPast(await $.fs.read(file).catch(() => ''), sessionId)
     }
     // How many are still open, for session-board's recap chip: a mod cannot
     // read another mod's state, so it goes in a small file beside the board's
     // cards. Written only when the count changes; nothing reaches the model.
+    // The same tick keeps this session's line in the stats file, written only when a count changes.
     if (home !== '') {
       let last = ''
+      let lastStats = ''
       $.clock.every(2_000, () => {
         void (async () => {
           const all = await read($, list)
           const open = all.filter(a => a.status === 'open')
           const text = JSON.stringify({ open: open.length, high: open.filter(a => a.impact === 'high').length })
           // The id changes on /clear: the count follows the session it belongs to.
-          const path = `${home}/.claude/session-board/${await $.session.id()}.assume`
-          if (`${path}|${text}` === last) return
-          last = `${path}|${text}`
-          await $.fs.write(path, text)
+          const id = await $.session.id()
+          const path = `${home}/.claude/session-board/${id}.assume`
+          if (`${path}|${text}` !== last) {
+            last = `${path}|${text}`
+            await $.fs.write(path, text)
+          }
+          const counted = [...(await read($, cleared)), ...all]
+          if (statsFile === '' || counted.length === 0) return
+          const counts = stats(counted, 0, id)
+          const key = JSON.stringify(counts)
+          if (key === lastStats) return
+          lastStats = key
+          await writeStats($, { ...counts, at: await $.clock.now() })
         })().catch(() => undefined)
       })
     }
@@ -241,11 +306,10 @@ export const register: Register = on => {
 
   // A correction typed by hand into the prompt that Fix pre-filled (surfaces with no text field).
   on('prompt.submit', async ($, e, next) => {
-    const m = /^Correction to assumption A(\d+) \(".*"\): ([\s\S]+)$/.exec(e.text)
-    const fix = m?.[2]?.trim() ?? ''
-    const a = m === null || fix === '' ? undefined : (await read($, list)).find(x => x.id === Number(m[1]))
-    if (a !== undefined) await persist($, a, fix)
-    else if (m === null && !e.text.startsWith('/')) task = short(e.text)
+    const typed = typedCorrection(e.text)
+    const a = typed === undefined ? undefined : (await read($, list)).find(x => x.id === typed.id)
+    if (a !== undefined && typed !== undefined) await persist($, a, typed.fix)
+    else if (!e.text.startsWith('Correction to assumption A') && !e.text.startsWith('/')) task = short(e.text)
     return next(e)
   })
 
@@ -339,28 +403,19 @@ export const register: Register = on => {
           <Button key="as-card-cancel" label="Cancel" onPress={() => update($, editing, () => null)} />
         </Box>
       </Box>
-    ) : (
-      <Box key="as-card-body" flexDirection="column">
-        <Text bold>{cur.text}</Text>
-        {cur.why !== undefined && (
-          <Text dimColor italic>
-            why: {cur.why}
-          </Text>
-        )}
-        <Box marginTop={1}>
+    ) : (() => {
+      const skipN = skippable(items).length
+      const actions = (
+        <Box key="as-card-acts" flexShrink={0}>
           <Button key="as-card-right" label="✓ Right" hotkey="y" variant="primary" onPress={() => mark($, cur.id, 'right')} />
           <Text>  </Text>
           <Button key="as-card-fix" label="✗ Fix" hotkey="n" onPress={() => startFix($, cur, Input !== undefined)} />
           <Text>  </Text>
-          <Button
-            key="as-card-skip"
-            label="Skip"
-            hotkey="s"
-            onPress={async () => {
-              const now = await $.clock.now()
-              await update($, list, all => all.map(a => (a.id === cur.id ? { ...a, skippedAt: now } : a)))
-            }}
-          />
+          <Button key="as-card-skip" label="Skip" hotkey="s" onPress={() => mark($, cur.id, 'dismissed')} />
+          {skipN >= SKIP_ALL_MIN && <Text>  </Text>}
+          {skipN >= SKIP_ALL_MIN && (
+            <Button key="as-card-skip-all" label={`Skip all ${skipN}`} hotkey="a" onPress={() => skipAll($)} />
+          )}
           <Text>    </Text>
           <Button
             key="as-open"
@@ -370,8 +425,30 @@ export const register: Register = on => {
             <Text color="blue">all {open.length} ›</Text>
           </Button>
         </Box>
-      </Box>
-    )
+      )
+      // Low impact: one compact line, no reason shown. The text wraps rather than being cut, so it can still be judged.
+      if (!hot) {
+        return (
+          <Box key="as-card-body">
+            <Box key="as-card-text" flexShrink={1} marginRight={2}>
+              <Text bold wrap="wrap">{cur.text}</Text>
+            </Box>
+            {actions}
+          </Box>
+        )
+      }
+      return (
+        <Box key="as-card-body" flexDirection="column">
+          <Text bold>{cur.text}</Text>
+          {cur.why !== undefined && (
+            <Text dimColor italic>
+              why: {cur.why}
+            </Text>
+          )}
+          <Box marginTop={1}>{actions}</Box>
+        </Box>
+      )
+    })()
 
     // The band is one row per plugin, and this hook answers only this mod's row: other mods' strips are rows of
     // their own. What `next(e)` holds for this row is the engine's own drawing, a node a hook cannot look into,
@@ -454,15 +531,28 @@ export const register: Register = on => {
       )
     }
 
-    const reviewedRow = (a: Assumption) => (
+    const reviewedRow = (a: Assumption) => {
+      const color = a.status === 'right' ? 'green' : a.status === 'wrong' ? 'red' : 'gray'
+      const tag = a.status === 'right' ? '   ✓ right' : a.status === 'wrong' ? '   ✗ fixed' : '   – skipped'
+      return (
       <Box key={`as-row-${a.id}`} flexDirection="column">
         <Text>
-          <Text color={a.status === 'right' ? 'green' : 'red'}>● </Text>
+          <Text color={color}>● </Text>
           <Text dimColor>
             A{a.id}  {a.text}
           </Text>
-          <Text color={a.status === 'right' ? 'green' : 'red'}>{a.status === 'right' ? '   ✓ right' : '   ✗ fixed'}</Text>
+          <Text color={color} dimColor={a.status === 'dismissed'}>{tag}</Text>
         </Text>
+        {a.status === 'dismissed' && (
+          <Box key={`as-reopen-row-${a.id}`}>
+            <Text dimColor>│   </Text>
+            <Button
+              key={`as-reopen-${a.id}`}
+              label="Reopen"
+              onPress={() => update($, list, all => all.map(x => (x.id === a.id ? { ...x, status: 'open' as const } : x)))}
+            />
+          </Box>
+        )}
         {a.correction !== undefined && (
           <Text>
             <Text dimColor>│   </Text>
@@ -470,7 +560,9 @@ export const register: Register = on => {
           </Text>
         )}
       </Box>
-    )
+      )
+    }
+    const skipN = skippable(items).length
 
     return (
       <Box flexDirection="column">
@@ -506,11 +598,19 @@ export const register: Register = on => {
               <Text dimColor>Mark all right</Text>
             </Button>
           )}
+          {skipN >= SKIP_ALL_MIN && <Text dimColor>   ·   </Text>}
+          {skipN >= SKIP_ALL_MIN && (
+            <Button key="as-skip-all" plain onPress={() => skipAll($)}>
+              <Text dimColor>Skip all {skipN}</Text>
+            </Button>
+          )}
           {open.length > 0 && <Text dimColor>   ·   </Text>}
           <Button
             key="as-clear"
             plain
             onPress={async () => {
+              const gone = await read($, list)
+              await update($, cleared, old => [...old, ...gone])
               await update($, list, () => [])
               await update($, editing, () => null)
             }}

@@ -264,3 +264,142 @@ test('mobile: Fix pre-fills the prompt on the card and in the panel, and the typ
   expect(v).toContain('- A2 wrong (correction sent in chat): Use tabs')
   expect(JSON.parse(lines(r)[0]!).correction).toBe('Ship on Monday')
 })
+
+test('skip all: closes the open low-impact ones, keeps high impact, tells Claude nothing, and Reopen brings one back', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  bottom(on)
+  const log = (assumption: string, impact?: 'high') => $.tool.call({ tool: LOG, assumption, why: 'a reason', impact } as never)
+  await log('Use British spelling')
+  await log('Delete the old build folder', 'high')
+  await log('Output goes in docs')
+  await log('Keep the old tests')
+  const card = async () => {
+    const band = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+    return { band, text: (await band.find({ key: 'as-card' }))?.text.replace(/\s+/g, ' ') ?? '' }
+  }
+
+  // The high-impact one leads, shown in full with its reason; Skip all counts only the low ones.
+  let c = await card()
+  expect(c.text).toContain('Delete the old build folder')
+  expect(c.text).toContain('why: a reason')
+  expect(c.text).toContain('Skip all 3')
+  await c.band.press({ key: 'as-card-skip-all' })
+  await c.band.unmount()
+
+  c = await card()
+  expect(c.text).toContain('⚠ ASSUMPTION 1/1')
+  expect(await c.band.find({ key: 'as-card-skip-all' })).toBeUndefined()
+  await c.band.unmount()
+  expect((await sections($)).some(s => s.id === 'assumptions:verdicts')).toBe(false)
+
+  // The panel lists the skipped ones; Reopen puts one back on the card.
+  const pane = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'Pane', requestId: 'assumptions', props: PANE_PROPS })
+  expect(await pane.find({ type: 'Text', text: /REVIEWED 3/ })).toBeDefined()
+  expect(await pane.find({ key: 'as-skip-all' })).toBeUndefined()
+  await pane.press({ key: 'as-toggle-reviewed' })
+  expect(await pane.find({ type: 'Text', text: /A3 +Output goes in docs.*– skipped/ })).toBeDefined()
+  await pane.press({ key: 'as-reopen-3' })
+  await pane.unmount()
+  c = await card()
+  expect(c.text).toContain('1/2')
+  await c.band.press({ key: 'as-card-right' })
+  await c.band.unmount()
+  c = await card()
+  expect(c.text).toContain('Output goes in docs')
+  await c.band.unmount()
+  const v = (await sections($)).find(s => s.id === 'assumptions:verdicts')?.text ?? ''
+  expect(v).toContain('- A2 right: Delete the old build folder')
+  expect(v).not.toContain('A1')
+  expect(v).not.toContain('A4')
+})
+
+test('skip all in the panel footer: shown at two or more, and closes only low-impact ones', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  bottom(on)
+  await $.tool.call({ tool: LOG, assumption: 'Use tabs' } as never)
+  await $.tool.call({ tool: LOG, assumption: 'Drop the table', impact: 'high' } as never)
+  let pane = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'Pane', requestId: 'assumptions', props: PANE_PROPS })
+  expect(await pane.find({ key: 'as-skip-all' })).toBeUndefined()
+  await pane.unmount()
+  await $.tool.call({ tool: LOG, assumption: 'Name it notes.md' } as never)
+  pane = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'Pane', requestId: 'assumptions', props: PANE_PROPS })
+  expect(await pane.find({ type: 'Text', text: /Skip all 2/ })).toBeDefined()
+  await pane.press({ key: 'as-skip-all' })
+  expect(await pane.find({ type: 'Text', text: /TO REVIEW 1/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /A2 +Drop the table/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('stats: one line per session with counts only, replaced on change, other sessions kept', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const r = bottom(on)
+  const STATS = '/home/me/.claude/assumptions/stats.jsonl'
+  r.files.set(STATS, `${JSON.stringify({ at: 1, session: 'old', repo: '/x', logged: 5, right: 5, wrong: 0, skipped: 0, open: 0, high: 0 })}\n`)
+  await $.session.start({ cwd: '/home/me/vault/sub', surface: 'terminal', isInteractive: true })
+  await clock.advance(2_000)
+  // Nothing logged yet: no line for this session.
+  expect((r.files.get(STATS) ?? '').split('\n').filter(l => l !== '')).toHaveLength(1)
+
+  await $.tool.call({ tool: LOG, assumption: 'Secret plan text', impact: 'high' } as never)
+  await $.tool.call({ tool: LOG, assumption: 'Use tabs' } as never)
+  await $.tool.call({ tool: LOG, assumption: 'Use spaces' } as never)
+  await clock.advance(2_000)
+  const band = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  await band.press({ key: 'as-card-right' })
+  await band.unmount()
+  const again = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  await again.press({ key: 'as-card-skip' })
+  await again.unmount()
+  await clock.advance(2_000)
+
+  const text = r.files.get(STATS) ?? ''
+  expect(text).not.toContain('Secret plan')
+  const rows = text.split('\n').filter(l => l !== '').map(l => JSON.parse(l))
+  expect(rows).toHaveLength(2)
+  expect(rows[0].session).toBe('old')
+  expect(rows[1]).toMatchObject({ session: 's1', repo: '/home/me/vault', logged: 3, right: 1, wrong: 0, skipped: 1, open: 1, high: 1 })
+})
+
+test('typed correction: an edited or dropped quote is still recorded', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const r = bottom(on)
+  await $.session.start({ cwd: '/home/me/vault/sub', surface: 'mobile', isInteractive: true })
+  await $.tool.call({ tool: LOG, assumption: 'Ship on Friday' } as never)
+  await $.tool.call({ tool: LOG, assumption: 'Use tabs' } as never)
+  await $.prompt.submit({ text: 'Correction to assumption A1 (ship friday): Ship on Monday', origin: { kind: 'bridge' }, wait: false })
+  await $.prompt.submit({ text: 'Correction to assumption A2: Use spaces', origin: { kind: 'bridge' }, wait: false })
+  expect(lines(r).map(l => JSON.parse(l).correction)).toEqual(['Ship on Monday', 'Use spaces'])
+})
+
+test('guidance: log before acting, and leave out defaults nobody would question', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  bottom(on)
+  const g = (await sections($)).find(s => s.id === 'assumptions:guidance')?.text ?? ''
+  expect(g).toContain('Log the assumption before the tool call that acts on it.')
+  expect(g).toContain('Do not log a default the user would not question')
+})
+
+test('stats survive Clear history, and a new assumption after Skip all shows on the card', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const r = bottom(on)
+  const STATS = '/home/me/.claude/assumptions/stats.jsonl'
+  await $.session.start({ cwd: '/home/me/vault/sub', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: LOG, assumption: 'Use tabs' } as never)
+  await $.tool.call({ tool: LOG, assumption: 'Use spaces' } as never)
+  let band = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  await band.press({ key: 'as-card-skip-all' })
+  await band.unmount()
+
+  await $.tool.call({ tool: LOG, assumption: 'Name it notes.md' } as never)
+  band = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect((await band.find({ key: 'as-card' }))?.text).toContain('Name it notes.md')
+  await band.unmount()
+
+  const pane = await $.ui.mount({ plugin: 'assumptions', surface: 'terminal', component: 'Pane', requestId: 'assumptions', props: PANE_PROPS })
+  await pane.press({ key: 'as-clear' })
+  await pane.unmount()
+  await $.tool.call({ tool: LOG, assumption: 'Ship on Monday' } as never)
+  await clock.advance(2_000)
+  const row = JSON.parse((r.files.get(STATS) ?? '').trim().split('\n').at(-1)!)
+  expect(row).toMatchObject({ session: 's1', logged: 4, skipped: 2, open: 2 })
+})

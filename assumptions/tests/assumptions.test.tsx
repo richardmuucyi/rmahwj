@@ -60,14 +60,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await c.band.press({ key: 'as-card-right' })
     await c.band.unmount()
 
-    // Then the oldest low-impact one; Skip sends it to the back.
+    // Then the oldest low-impact one, compact: no reason line. Skip dismisses it; it does not come back.
     c = await card()
     expect(c.text).toContain('ASSUMPTION 1/2')
     expect(c.text).toContain('Use British spelling')
+    expect(c.text).not.toContain('why:')
+    expect(c.text).toContain('Skip all 2')
     await c.band.press({ key: 'as-card-skip' })
     await c.band.unmount()
     c = await card()
+    expect(c.text).toContain('ASSUMPTION 1/1')
     expect(c.text).toContain('Output goes in the docs folder')
+    // One left: Skip all would close only one, so it is not offered.
+    expect(await c.band.find({ key: 'as-card-skip-all' })).toBeUndefined()
 
     // Fix in place: the card turns into the field, the correction goes to Claude.
     await c.band.press({ key: 'as-card-fix' })
@@ -78,11 +83,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(sent[0]).toContain('Correction to assumption A2')
     await c.band.unmount()
 
-    // The skipped one is back; Right on it empties the queue: the card is gone.
-    c = await card()
-    expect(c.text).toContain('Use British spelling')
-    await c.band.press({ key: 'as-card-right' })
-    await c.band.unmount()
+    // The fix emptied the queue: the card is gone.
     await clock.advance(2_000)
     expect(closed).toEqual(['assumptions'])
     c = await card()
@@ -98,8 +99,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ type: 'Text', text: /TO REVIEW 0/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /A1 +Use British/ })).toBeUndefined()
     await pane.press({ key: 'as-toggle-reviewed' })
-    expect(await pane.find({ type: 'Text', text: /A1 +Use British/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /A1 +Use British.*– skipped/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /→ Put it in docs\/generated/ })).toBeDefined()
+    expect(await pane.find({ key: 'as-reopen-1' })).toBeDefined()
+    expect(await pane.find({ key: 'as-reopen-2' })).toBeUndefined()
     await pane.press({ key: 'as-clear' })
     expect(JSON.stringify(await log('Keep the old file'))).toContain('A4')
   })

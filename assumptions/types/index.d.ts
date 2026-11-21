@@ -6,17 +6,30 @@ export type Assumption = {
   why?: string
   /** High: a mistake here would be costly to undo. Reviewed first, drawn in yellow. */
   impact?: 'high' | 'low'
-  status: 'open' | 'right' | 'wrong'
+  /** Dismissed: closed with no verdict by Skip or Skip all; Claude is told nothing about it. */
+  status: 'open' | 'right' | 'wrong' | 'dismissed'
   /** What the person said it should be, once marked wrong and sent. */
   correction?: string
   /** Epoch ms when Claude logged it. */
   at?: number
-  /** Epoch ms of the last Skip: skipped ones go to the back of the queue. */
-  skippedAt?: number
   /** The session's tool-call count when it was logged: later calls were built on it. Absent on ones stored before 0.5.0. */
   stepAt?: number
   /** The start of the person's prompt it was made under, at most 60 characters. */
   task?: string
+}
+
+/** One session's counts, one JSON object per line in ~/.claude/assumptions/stats.jsonl. No assumption text. */
+export type SessionStats = {
+  /** Epoch ms of the last change. */
+  at: number
+  session: string
+  repo: string
+  logged: number
+  right: number
+  wrong: number
+  skipped: number
+  open: number
+  high: number
 }
 
 /** One corrected assumption, one JSON object per line in ~/.claude/assumptions/<repo slug>.jsonl. */
@@ -47,6 +60,8 @@ declare module 'claude-code' {
       showReviewed: boolean
       /** Tool calls this session, the assumption tool's own excluded. */
       steps: number
+      /** Assumptions removed by Clear history, kept so this session's stats still count them. */
+      cleared: Assumption[]
     }
   }
 }
