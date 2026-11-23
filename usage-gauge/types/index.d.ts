@@ -30,6 +30,13 @@ export type Git = {
   stale?: boolean
 }
 
+/**
+ * Where the session runs, against its root (where it started, or where `/cd` took it), as names. `root` is the root's
+ * last name, or, outside the root, the current folder's own last name. `here` is the current folder's last name, only
+ * under the root.
+ */
+export type Folder = { place: 'root' | 'under' | 'outside'; root: string; here?: string }
+
 /** Everything the two rows draw. */
 export type Gauge = {
   /** The main loop's model and effort, as its latest request named them. */
@@ -86,6 +93,8 @@ export type Gauge = {
   ttlChoice?: '5m' | '1h'
   /** Absent: not a repository, or git has not answered yet. */
   git?: Git
+  /** Absent: the engine has not said where the session runs yet. */
+  folder?: Folder
 }
 
 declare module 'claude-code' {

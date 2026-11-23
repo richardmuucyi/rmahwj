@@ -21,7 +21,7 @@ const BAND = {
   hasSurvey: false,
   isWorking: false,
   maxRows: 10,
-  bodyColumns: 100,
+  bodyColumns: 130,
   scroll: { offset: 0, bodyRows: 10 },
   view: {},
 }
@@ -55,10 +55,10 @@ async function strip($: Engine, surface: 'terminal' | 'desktop'): Promise<string
 }
 
 /** The engine beneath the plugin: a shared folder in memory, a session id the test can change. */
-function bottom(on: On, files: Map<string, string>, opts: { id: { value: string }; statuses: (string | undefined)[] }) {
+function bottom(on: On, files: Map<string, string>, opts: { id: { value: string }; statuses: (string | undefined)[]; root?: string }) {
   on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
   on('session.id', () => ({ value: opts.id.value }))
-  on('session.root', () => ({ value: '/home/me/vault' }))
+  on('session.root', () => ({ value: opts.root ?? '/home/me/vault' }))
   on('fs.write', (_$, e) => {
     files.set(posix(e.path), e.text)
     return { value: undefined }
@@ -197,32 +197,31 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     // Status line: alerts about other sessions only. A working peer and the
     // empty sessions are not alerts; this session never appears.
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ◔1 ○3 ☰ All ›')
-    // Every chip of the row sits on true black: "current" and "others" are white text, a status is its colour as the
-    // text (so a status matches the labels), every count of the quiet sessions is a chip too, and nothing divides the groups.
+    expect(await strip($, surface)).toBe('vault ◔ Working │ others ? iams-ups ☰ All ›')
+    // Every chip of the row sits on true black: the folder label and "others" are dim text, a status is its colour as the
+    // text (so a status matches the labels). The quiet sessions are not drawn (since the 2026-11-21 strip).
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
     const drawn = await band.find({ key: 'sb-strip' })
     expect(chipsOf(drawn)).toEqual([
-      ['#000000', ' current  ', '#8B949E'], ['#000000', ' ◔ Working ', 'cyan'], ['#000000', ' others ', '#8B949E'],
-      ['#000000', ' ? iams-ups ', 'yellow'], ['#000000', ' ◔1 ', 'cyan'], ['#000000', ' ○3 ', 'gray'],
+      ['#000000', ' vault    ', '#8B949E'], ['#000000', ' ◔ Working ', 'cyan'], ['#000000', ' others ', '#8B949E'],
+      ['#000000', ' ? iams-ups ', 'yellow'],
     ])
     // a dim "│" divides the two groups, one space either side of the gap
     expect(drawn!.text).toContain('Working  │  others')
     // dim labels, bold values: the label recedes and the value beside it is what stands out
     expect(weightsOf(drawn)).toEqual([
-      [' current  ', false], [' ◔ Working ', true], [' others ', false], [' ? iams-ups ', true], [' ◔1 ', true], [' ○3 ', true],
+      [' vault    ', false], [' ◔ Working ', true], [' others ', false], [' ? iams-ups ', true],
     ])
     // no emoji: an emoji ignores the colour it is given, so the strip draws text glyphs
     expect(drawn!.text).not.toMatch(/[⏳⌛❓🤖⏸⏹]/u)
     // the link is the lighter blue
     expect(JSON.stringify(await band.find({ key: 'sb-strip-open' }))).toContain('#7AA2F7')
     // Every chip touches the next: only the two paddings sit between two of them (no gap), in both groups.
-    expect(drawn!.text).toContain('current   ◔ Working')
-    expect(drawn!.text).not.toContain('current    ')
+    expect(drawn!.text).toContain('vault     ◔ Working')
+    expect(drawn!.text).not.toContain('vault      ')
     // the status glyph is in cell 11: the same cell as the Actions button of the context row below it (guard.picker test)
     expect(drawn!.text.indexOf('◔')).toBe(11)
-    expect(drawn!.text).toContain('others  ? iams-ups  ◔1  ○3')
-    expect(drawn!.text).not.toContain('iams-ups   ')
+    expect(drawn!.text).toContain('others  ? iams-ups    ☰ All ›')
     await band.unmount()
     // Nothing is left in the status line: the strip replaces it.
     expect(statuses.filter(s => s !== undefined)).toEqual([])
@@ -255,12 +254,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
       status: 'replied', changedAt: 1_008_000, seenAt: 1_008_000,
     }))
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ○3 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ◔ Working │ others ? iams-ups ✓ vault · Tidy the inbox ☰ All ›')
 
     // A card caught mid-write keeps what it said last round.
     files.set(`${DIR}/peer.json`, '{"id":"peer","fol')
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ○3 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ◔ Working │ others ? iams-ups ✓ vault · Tidy the inbox ☰ All ›')
     files.set(`${DIR}/peer.json`, card({
       id: 'peer', folder: '/home/me/vault', project: 'vault', asked: 'Tidy the inbox',
       status: 'replied', changedAt: 1_008_000, seenAt: 1_015_000,
@@ -272,9 +271,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
       status: 'replied', changedAt: 1_012_000, seenAt: 1_012_000,
     }))
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? iams-ups ✓ vault ✓ codesignr ○3 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ◔ Working │ others ? iams-ups ✓ vault · Tidy the inbox ✓ codesignr ☰ All ›')
 
-    // Two sessions in one folder need you: one entry with a count.
+    // Two sessions in this session's folder need you: a pill each, named by its request.
     for (const id of ['w1', 'w2']) {
       files.set(`${DIR}/${id}.json`, card({
         id, folder: '/home/me/vault', project: 'vault', asked: 'Run tests',
@@ -287,25 +286,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
       status: 'background', tasks: ['shell: Render on the GPU'], activity: 'shell: Render on the GPU', seenAt: 1_020_000,
     }))
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ◔ Working │ others ? vault ×2 ? iams-ups ✓ vault ✓ codesignr ◌1 ○3 ☰ All ›')
-    // the waiting count is a magenta chip, the idle count a gray one (the colours of their status pills)
-    const waiting = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
-    expect(chipsOf(await waiting.find({ key: 'sb-strip' })).slice(-2)).toEqual([['#000000', ' ◌1 ', 'magenta'], ['#000000', ' ○3 ', 'gray']])
+    // The names take 135 cells: at 140 columns they fit; at 130 the line falls back to counts rather than wrap.
+    expect(await stripAt($, surface, 140)).toBe('vault ◔ Working │ others ? vault · Run tests ? vault · Run tests ? iams-ups ✓ vault · Tidy the inbox ✓ codesignr ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ◔ Working │ ?3 ✓2 ☰ ›')
+    // the replied pills end the group, green; the waiting and idle sessions are not drawn
+    const waiting = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 140 } })
+    expect(chipsOf(await waiting.find({ key: 'sb-strip' })).slice(-2)).toEqual([['#000000', ' ✓ vault · Tidy the inbox ', 'green'], ['#000000', ' ✓ codesignr ', 'green']])
     // many pills of the same colour still touch (each starts with its own glyph, so they read as separate names)
-    expect((await waiting.find({ key: 'sb-strip' }))!.text).toContain('others  ? vault ×2  ? iams-ups  ✓ vault  ✓ codesignr  ◌1  ○3')
+    expect((await waiting.find({ key: 'sb-strip' }))!.text).toContain('others  ? vault · Run tests  ? vault · Run tests  ? iams-ups  ✓ vault · Tidy the inbox  ✓ codesignr')
     await waiting.unmount()
-    // A narrow pane: counts, not folder names.
+    // A narrow pane (under 80 columns): this session alone, the other sessions behind the link.
     const narrow = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 36 } })
     const narrowStrip = await narrow.find({ key: 'sb-strip' })
-    expect(narrowStrip?.text.replace(/\s+/g, ' ').trim()).toBe('current ◔ │ others ?3 ✓2 ◌1 ○3 ☰ All ›')
-    // the narrow strip has the same two black label chips, no pipe, and its chips touch each other too
-    expect(chipsOf(narrowStrip)).toEqual([
-      ['#000000', ' current  ', '#8B949E'], ['#000000', ' ◔ ', 'cyan'], ['#000000', ' others ', '#8B949E'],
-      ['#000000', ' ?3 ', 'yellow'], ['#000000', ' ✓2 ', 'green'], ['#000000', ' ◌1 ', 'magenta'], ['#000000', ' ○3 ', 'gray'],
-    ])
-    expect(narrowStrip?.text).toContain('◔  │  others  ?3')
-    expect(narrowStrip?.text).toContain('current   ◔')
-    expect(narrowStrip?.text).toContain('others  ?3  ✓2  ◌1  ○3')
+    expect(narrowStrip?.text.replace(/\s+/g, ' ').trim()).toBe('vault ◔ Working ☰ ›')
+    expect(chipsOf(narrowStrip)).toEqual([['#000000', ' vault    ', '#8B949E'], ['#000000', ' ◔ Working ', 'cyan']])
+    expect(narrowStrip?.text).not.toContain('others')
+    expect(narrowStrip?.text).toContain('vault     ◔ Working')
     await narrow.unmount()
   })
 
@@ -328,7 +324,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await endTurn($, 't1', [{ id: 'b1', type: 'shell', description: 'Render on the GPU' }])
     expect(own(files).status).toBe('background')
     // Nothing elsewhere needs you or replied, but the job alone opens the strip (since 0.29.0; before, no strip).
-    expect(await strip($, surface)).toBe('current ◌ Waiting ◈ 1 job ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ◌ Waiting ◈ 1 job ☰ All ›')
     expect(own(files).tasks).toEqual(['shell: Render on the GPU'])
 
     // The job reports back: a turn of its own, then nothing is left in flight.
@@ -377,3 +373,321 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(own(files, 'old').status).toBe('closed')
   })
 }
+
+// ── the strip by width, this session's folder first (2026-11-21) ───────────────
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`the card keeps this conversation's first request, set once; a slash command and a task report never set it; /clear empties it (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const statuses: (string | undefined)[] = []
+    const id = { value: 'old' }
+    bottom(on, files, { id, statuses })
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await $.prompt.submit({ text: '/model', origin: { kind: 'composer' }, wait: false })
+    await $.prompt.submit({ text: '<task-notification><task-id>b1</task-id></task-notification>', origin: { kind: 'task-notification' }, wait: false })
+    expect(own(files, 'old').first ?? '').toBe('')
+    await $.prompt.submit({ text: 'Build the board', origin: { kind: 'composer' }, wait: false })
+    await $.prompt.submit({ text: 'Then the strip', origin: { kind: 'composer' }, wait: false })
+    expect(own(files, 'old').first).toBe('Build the board')
+    expect(own(files, 'old').asked).toBe('Then the strip')
+    await $.session.end({ reason: 'clear', sessionId: 'old', resume: { id: 'old' } as never })
+    id.value = 'new'
+    await clock.advance(5_000)
+    expect(own(files, 'new').first ?? '').toBe('')
+    await $.prompt.submit({ text: 'A new conversation', origin: { kind: 'composer' }, wait: false })
+    expect(own(files, 'new').first).toBe('A new conversation')
+  })
+}
+
+/** The strip at a given width, whitespace folded; '' when it is not drawn. */
+async function stripAt($: Engine, surface: 'terminal' | 'desktop', bodyColumns: number): Promise<string> {
+  const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns } })
+  const found = await band.find({ key: 'sb-strip' })
+  await band.unmount()
+  return found ? found.text.replace(/\s+/g, ' ').trim() : ''
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`an other session in this session's folder gets a pill of its own, with its first request, else its latest (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const statuses: (string | undefined)[] = []
+    // Two sessions in this folder: one that wrote its first request, one from an older version that wrote none.
+    files.set(`${DIR}/peer1.json`, card({ id: 'peer1', folder: '/home/me/vault', project: 'vault', asked: 'And the tests', first: 'Fix the gcp merge', status: 'replied', seenAt: 1_004_000 }))
+    files.set(`${DIR}/peer2.json`, card({ id: 'peer2', folder: '/home/me/vault', project: 'vault', asked: 'Tidy the inbox', status: 'replied', seenAt: 1_004_000 }))
+    // Two sessions in another folder: still one pill, counted.
+    files.set(`${DIR}/far1.json`, card({ id: 'far1', folder: '/home/me/iams-ups', project: 'iams-ups', asked: 'Deploy', first: 'Deploy', status: 'needs-you', seenAt: 1_004_000 }))
+    files.set(`${DIR}/far2.json`, card({ id: 'far2', folder: '/home/me/iams-ups', project: 'iams-ups', asked: 'Logs', first: 'Logs', status: 'needs-you', seenAt: 1_004_000 }))
+    bottom(on, files, { id: { value: 'me' }, statuses })
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await clock.advance(5_000)
+    const s = await stripAt($, surface, 130)
+    expect(s).toContain('? iams-ups ×2')
+    expect(s).toContain('✓ vault · Fix the gcp merge')
+    expect(s).toContain('✓ vault · Tidy the inbox')
+  })
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  /** This session working in /home/me/vault; others: one needs you, one replied, two quiet (one working, one idle). */
+  async function tiers($: Engine, on: On, quietOnly = false) {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const statuses: (string | undefined)[] = []
+    if (!quietOnly) {
+      files.set(`${DIR}/far.json`, card({ id: 'far', folder: '/home/me/iams-ups', project: 'iams-ups', asked: 'Deploy', status: 'needs-you', seenAt: 1_004_000 }))
+      files.set(`${DIR}/cs.json`, card({ id: 'cs', folder: '/home/me/codesignr', project: 'codesignr', asked: 'Plan 3', status: 'replied', seenAt: 1_004_000 }))
+    }
+    files.set(`${DIR}/busy.json`, card({ id: 'busy', folder: '/home/me/x', project: 'x', asked: 'Render', status: 'working', seenAt: 1_004_000 }))
+    files.set(`${DIR}/idle.json`, card({ id: 'idle', folder: '/home/me/y', project: 'y', asked: 'Notes', status: 'open', seenAt: 1_004_000 }))
+    bottom(on, files, { id: { value: 'me' }, statuses })
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await $.prompt.submit({ text: 'Build the board', origin: { kind: 'composer' }, wait: false })
+    await $.turn.start({ text: 'Build the board', turnId: 't1' })
+    await clock.advance(5_000)
+    return { clock }
+  }
+
+  test(`line 1 by width: names from 120 columns, counts from 80, this session alone below; quiet sessions are not drawn (${surface})`, async ($, on) => {
+    await tiers($, on)
+    const wide = 'vault ◔ Working │ others ? iams-ups ✓ codesignr ☰ All ›'
+    const mid = 'vault ◔ Working │ ?1 ✓1 ☰ ›'
+    const small = 'vault ◔ Working ☰ ›'
+    for (const [cols, want] of [[200, wide], [130, wide], [120, wide], [119, mid], [100, mid], [80, mid], [79, small], [60, small], [36, small]] as const) {
+      expect(await stripAt($, surface, cols), `${cols} columns`).toBe(want)
+    }
+  })
+
+  test(`with only quiet sessions out there, line 1 is this session and the link (${surface})`, async ($, on) => {
+    await tiers($, on, true)
+    expect(await stripAt($, surface, 130)).toBe('vault ◔ Working ☰ All ›')
+    expect(await stripAt($, surface, 100)).toBe('vault ◔ Working ☰ ›')
+  })
+
+  test(`what to check is on a line of its own, at every width (${surface})`, async ($, on) => {
+    await tiers($, on)
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+    await $.turn.complete({ answer: 'Done.\n\nTurn: Built the strip · check: the strip at 100 columns', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+    for (const cols of [130, 100, 70]) {
+      const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: cols } })
+      const line1 = (await band.find({ key: 'sb-strip' }))?.text ?? ''
+      const line2 = (await band.find({ key: 'sb-recap-row' }))?.text.replace(/\s+/g, ' ').trim() ?? ''
+      await band.unmount()
+      expect(line1, `${cols} columns`).not.toContain('CHECK')
+      expect(line1, `${cols} columns`).toContain('vault')
+      expect(line2, `${cols} columns`).toBe('⚑ CHECK the strip at 100 columns')
+    }
+  })
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`a long folder name is cut to 24 characters, so it cannot crowd line 1 (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const root = '/home/me/a-very-long-project-folder-name-for-the-strip'
+    files.set(`${DIR}/far.json`, card({ id: 'far', folder: '/home/me/iams-ups', project: 'iams-ups', asked: 'Deploy', status: 'needs-you', seenAt: 1_004_000 }))
+    bottom(on, files, { id: { value: 'me' }, statuses: [], root })
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.advance(5_000)
+    const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 130 } })
+    const label = chipsOf(await band.find({ key: 'sb-strip' }))[0]![1].trim()
+    await band.unmount()
+    expect(label.length).toBeLessThanOrEqual(24)
+    expect(label.startsWith('a-very-long-project')).toBe(true)
+    expect(label.endsWith('…')).toBe(true)
+  })
+}
+
+// ── line 1 fits the width it is drawn at (final review, 2026-11-21) ──────────────
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  /** The strip's line 1 as drawn at a width: [text folded, cells the raw text takes]. */
+  async function line1At($: Engine, bodyColumns: number): Promise<[string, number]> {
+    const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns } })
+    const raw = (await band.find({ key: 'sb-strip' }))?.text ?? ''
+    await band.unmount()
+    return [raw.replace(/\s+/g, ' ').trim(), [...raw.trimEnd()].length]
+  }
+
+  test(`the names do not fit: line 1 falls back to counts rather than wrap (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const root = '/home/me/personal-notes'
+    for (const [id, first] of [['a', 'Fix the gcp merge conflict today'], ['b', 'Rebuild the compare page from scratch']]) {
+      files.set(`${DIR}/${id}.json`, card({ id, folder: root, project: 'personal-notes', asked: first, first, status: 'needs-you', seenAt: 1_004_000 }))
+    }
+    bottom(on, files, { id: { value: 'me' }, statuses: [], root })
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await $.prompt.submit({ text: 'Build the board', origin: { kind: 'composer' }, wait: false })
+    await $.turn.start({ text: 'Build the board', turnId: 't1' })
+    await clock.advance(5_000)
+    // 16 + 11 + 3 + 8 + 45 + 45 + 3 + 7 = 138 cells with the names.
+    const [wide, wideCells] = await line1At($, 140)
+    expect(wide).toContain('others ? personal-notes · Fix the gcp merge')
+    expect(wideCells).toBeLessThanOrEqual(140)
+    const [narrower, narrowerCells] = await line1At($, 130)
+    expect(narrower).toBe('personal-notes ◔ Working │ ?2 ☰ ›')
+    expect(narrowerCells).toBeLessThanOrEqual(130)
+  })
+
+  test(`a narrow pane: the status shrinks to its glyph, then the label to 8, so line 1 stays one line (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const root = '/home/me/personal-notes'
+    files.set(`${DIR}/q.json`, card({ id: 'q', folder: '/home/me/x', project: 'x', asked: 'Render', status: 'working', seenAt: 1_004_000 }))
+    bottom(on, files, { id: { value: 'me' }, statuses: [], root })
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.advance(5_000)
+    for (const [cols, want] of [
+      [70, 'personal-notes ○ Open · nothing asked yet ☰ ›'],
+      [40, 'personal-notes ○ ☰ ›'],
+      [20, 'persona… ○ ☰ ›'],
+    ] as const) {
+      const [text, cells] = await line1At($, cols)
+      expect(text, `${cols} columns`).toBe(want)
+      expect(cells, `${cols} columns`).toBeLessThanOrEqual(cols)
+    }
+  })
+
+  test(`the counts from 80 to 119 columns are chips in their status colours, touching (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    files.set(`${DIR}/far.json`, card({ id: 'far', folder: '/home/me/iams-ups', project: 'iams-ups', asked: 'Deploy', status: 'needs-you', seenAt: 1_004_000 }))
+    files.set(`${DIR}/cs.json`, card({ id: 'cs', folder: '/home/me/codesignr', project: 'codesignr', asked: 'Plan 3', status: 'replied', seenAt: 1_004_000 }))
+    bottom(on, files, { id: { value: 'me' }, statuses: [] })
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await clock.advance(5_000)
+    const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 100 } })
+    const drawn = await band.find({ key: 'sb-strip' })
+    await band.unmount()
+    expect(chipsOf(drawn).slice(-2)).toEqual([['#000000', ' ?1 ', 'yellow'], ['#000000', ' ✓1 ', 'green']])
+    expect(weightsOf(drawn).slice(-2)).toEqual([[' ?1 ', true], [' ✓1 ', true]])
+    expect(drawn!.text).toContain('?1  ✓1')
+  })
+}
+
+// ── what each session is on: a topic Claude keeps, and the now row (2026-11-21) ─────────
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  /** This session in /home/me/vault, one other session that needs you (so the strip is drawn). */
+  async function topicSetup($: Engine, on: On, others: Record<string, unknown>[] = []) {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const files = new Map<string, string>()
+    const id = { value: 'me' }
+    files.set(`${DIR}/far.json`, card({ id: 'far', folder: '/home/me/iams-ups', project: 'iams-ups', asked: 'Deploy', status: 'needs-you', seenAt: 1_004_000 }))
+    for (const o of others) files.set(`${DIR}/${String(o.id)}.json`, card({ seenAt: 1_004_000, ...o }))
+    bottom(on, files, { id, statuses: [] })
+    on('tool.call', () => ({ result: 'ok' }))
+    on('prompt.compose', () => ({ sections: [] }))
+    await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
+    await clock.advance(5_000)
+    const turn = async (turnId: string, answer: string) => {
+      await $.prompt.submit({ text: `Ask ${turnId}`, origin: { kind: 'composer' }, wait: false })
+      await $.turn.start({ text: `Ask ${turnId}`, turnId })
+      await $.tool.call({ tool: 'Edit', file_path: '/home/me/vault/hooks/register.tsx', old_string: 'a', new_string: 'b' })
+      await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+      await $.turn.complete({ answer, durationMs: 1000, isAborted: false, turnId, reason: 'answer' })
+      await clock.advance(5_000)
+    }
+    return { clock, files, id, turn }
+  }
+
+  test(`the turn guidance asks for the session's topic when it is new or changes (${surface})`, async ($, on) => {
+    await topicSetup($, on)
+    const composed = await $.prompt.compose({ model: 'claude-opus-4-1', promptModel: 'claude-opus-4-1', surfaces: [surface], tools: [], outputStyle: null, traits: [] } as never)
+    const guidance = composed.sections.map(x => x.text).join('\n')
+    expect(guidance).toContain('· topic: <')
+  })
+
+  test(`the card keeps the topic from Claude's Turn line until a new one; /clear empties it; check still parses (${surface})`, async ($, on) => {
+    const { files, id, clock, turn } = await topicSetup($, on)
+    await turn('t1', 'Done.\n\nTurn: Built the strip · topic: session-board strip redesign · check: the strip at 100 columns')
+    expect(own(files).topic).toBe('session-board strip redesign')
+    const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 130 } })
+    expect((await band.find({ key: 'sb-recap-row' }))?.text.replace(/\s+/g, ' ').trim()).toBe('⚑ CHECK the strip at 100 columns')
+    await band.unmount()
+    await turn('t2', 'Done.\n\nTurn: Fixed a test')
+    expect(own(files).topic).toBe('session-board strip redesign')
+    await $.session.end({ reason: 'clear', sessionId: 'me', resume: { id: 'me' } as never })
+    id.value = 'fresh'
+    await clock.advance(5_000)
+    expect(own(files, 'fresh').topic ?? '').toBe('')
+  })
+
+  test(`line 1 shows this session's topic beside its folder, and steps it down before anything else of its own (${surface})`, async ($, on) => {
+    const { turn } = await topicSetup($, on)
+    await turn('t1', 'Done.\n\nTurn: Built the strip · topic: session-board strip redesign')
+    expect(await stripAt($, surface, 130)).toBe('vault › session-board strip redesign ✓ Done │ others ? iams-ups ☰ All ›')
+    expect(await stripAt($, surface, 70)).toBe('vault › session-board strip redesign ✓ Done ☰ ›')
+    expect(await stripAt($, surface, 45)).toBe('vault › session-board… ✓ Done ☰ ›')
+    expect(await stripAt($, surface, 30)).toBe('vault ✓ Done ☰ ›')
+  })
+
+  test(`other sessions' pills show their topics: another folder's, and this folder's ahead of its first request (${surface})`, async ($, on) => {
+    await topicSetup($, on, [
+      { id: 'ops', folder: '/home/me/ops', project: 'ops', asked: 'Rotate', topic: 'deploy script', status: 'needs-you' },
+      { id: 'peer', folder: '/home/me/vault', project: 'vault', asked: 'Later', first: 'Fix the gcp merge', topic: 'gcp merge repair', status: 'replied' },
+    ])
+    const s = await stripAt($, surface, 160)
+    expect(s).toContain('? ops · deploy script')
+    expect(s).toContain('✓ vault · gcp merge repair')
+    expect(s).not.toContain('Fix the gcp merge')
+  })
+
+  test(`while Claude works, a row says what it is doing now; the row goes when the turn ends (${surface})`, async ($, on) => {
+    const { clock } = await topicSetup($, on)
+    await $.prompt.submit({ text: 'Build it', origin: { kind: 'composer' }, wait: false })
+    await $.turn.start({ text: 'Build it', turnId: 't1' })
+    const now = async () => {
+      const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 130, isWorking: true } })
+      const row = (await band.find({ key: 'sb-live' }))?.text.replace(/\s+/g, ' ').trim()
+      await band.unmount()
+      return row
+    }
+    expect(await now()).toBe('↳ Thinking')
+    await $.tool.call({ tool: 'Edit', file_path: '/home/me/vault/hooks/register.tsx', old_string: 'a', new_string: 'b' })
+    await clock.advance(0)
+    expect(await now()).toBe('↳ Editing register.tsx')
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+    await $.turn.complete({ answer: 'Done.', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+    await clock.advance(5_000)
+    expect(await now()).toBeUndefined()
+  })
+
+  // 0.33.0 final review: /resume keeps the conversation's topic; names keep their place at 120.
+  test(`a /resume in the same window brings back the conversation's topic and first request (${surface})`, async ($, on) => {
+    const { files, id, clock, turn } = await topicSetup($, on)
+    await turn('t1', 'Done.\n\nTurn: Built the strip · topic: session-board strip redesign')
+    await $.session.end({ reason: 'clear', sessionId: 'me', resume: { id: 'me' } as never })
+    id.value = 'fresh'
+    await clock.advance(5_000)
+    expect(own(files, 'fresh').id).toBe('fresh')
+    expect(own(files, 'fresh').topic ?? '').toBe('')
+    // back to the first conversation
+    await $.session.end({ reason: 'resume', sessionId: 'fresh', resume: { id: 'me' } as never })
+    id.value = 'me'
+    await clock.advance(5_000)
+    expect(own(files, 'me').topic).toBe('session-board strip redesign')
+    expect(own(files, 'me').first).toBe('Ask t1')
+    // the topic stays the same, so Claude leaves it out: the card keeps it
+    await turn('t3', 'Done.\n\nTurn: Fixed a test')
+    expect(own(files, 'me').topic).toBe('session-board strip redesign')
+  })
+
+  test(`at 120 columns this session's topic shortens so the other sessions keep their names (${surface})`, async ($, on) => {
+    const { turn } = await topicSetup($, on, [
+      { id: 'ops', folder: '/home/me/ops', project: 'ops', asked: 'Rotate', topic: 'deploy script', status: 'needs-you' },
+      { id: 'peer', folder: '/home/me/vault', project: 'vault', asked: 'Later', first: 'Fix the gcp merge', topic: 'gcp merge repair', status: 'replied' },
+    ])
+    await turn('t1', 'Done.\n\nTurn: Built the strip · topic: session-board strip redesign')
+    const s = await stripAt($, surface, 120)
+    expect(s).toContain('vault › session-board… ✓ Done')
+    expect(s).toContain('? ops · deploy script')
+    expect(s).toContain('✓ vault · gcp merge repair')
+  })
+}
+

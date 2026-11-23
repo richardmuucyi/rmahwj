@@ -19,7 +19,7 @@ const BAND = {
   hasSurvey: false,
   isWorking: true,
   maxRows: 10,
-  bodyColumns: 100,
+  bodyColumns: 130,
   scroll: { offset: 0, bodyRows: 10 },
   view: {},
 }
@@ -181,7 +181,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // The strip while it works: task bar, what it is on, subagents. No files link (removed in 0.31.3).
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
     const row = await band.find({ key: 'sb-live' })
-    expect(row?.text.replace(/\s+/g, ' ').trim()).toBe('▰▰▰▱▱▱▱▱▱▱ 1/3 Running tests │ ◈ Explore · haiku')
+    expect(row?.text.replace(/\s+/g, ' ').trim()).toBe('↳ Editing register.tsx │ ▰▰▰▱▱▱▱▱▱▱ 1/3 Running tests │ ◈ Explore · haiku')
     expect(await band.find({ key: 'sb-live-files' })).toBeUndefined()
     expect(await band.find({ key: 'engine-own' })).toBeDefined()
     await band.unmount()
@@ -301,23 +301,26 @@ for (const surface of ['terminal', 'desktop'] as const) {
     }))
     await clock.advance(5_000)
 
-    // The check and the review chip sit in the "this session" row, beside its pill, before the others.
+    // The check and the review chip sit on a row of their own, under line 1 (since the 2026-11-21 strip).
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, isWorking: false } })
     const row = (await band.find({ key: 'sb-strip' }))?.text.replace(/\s+/g, ' ').trim()
-    expect(row).toBe('current ✓ Done ⚑ CHECK mock order in jest.config.js ⚠ 1 to review ↓ │ others ? iams-ups ☰ All ›')
+    expect(row).toBe('vault ✓ Done │ others ? iams-ups ☰ All ›')
+    const recapRow = await band.find({ key: 'sb-recap-row' })
+    expect(recapRow?.text.replace(/\s+/g, ' ').trim()).toBe('⚑ CHECK mock order in jest.config.js ⚠ 1 to review ↓')
+    expect(chipsOf(recapRow)).toEqual([['yellow', ' ⚑ CHECK ', 'black'], ['yellow', ' ⚠ 1 to review ↓ ', 'black']])
     // The label chips touch their pills (only the two paddings between them: no gap), the flag touches the status
     // pill, and no pipe divides the groups. The whitespace-folded text above cannot show a gap.
     const drawn = await band.find({ key: 'sb-strip' })
     const raw = drawn?.text ?? ''
-    expect(raw).toContain('current   ✓ Done')
-    expect(raw).not.toContain('current    ')
+    expect(raw).toContain('vault     ✓ Done')
+    expect(raw).not.toContain('vault      ')
     // the status glyph is in cell 11, the same cell as the Actions button of the context row
     expect(raw.indexOf('✓')).toBe(11)
-    expect(raw).toContain('✓ Done  ⚑ CHECK')
+    expect(raw).not.toContain('CHECK')
     expect(raw).not.toContain('Done   ')
-    expect(raw).toContain('↓  │  others')
+    expect(raw).toContain('Done  │  others')
     expect(chipsOf(drawn)).toEqual([
-      ['#000000', ' current  ', '#8B949E'], ['#000000', ' ✓ Done ', 'green'], ['yellow', ' ⚑ CHECK ', 'black'], ['yellow', ' ⚠ 1 to review ↓ ', 'black'],
+      ['#000000', ' vault    ', '#8B949E'], ['#000000', ' ✓ Done ', 'green'],
       ['#000000', ' others ', '#8B949E'], ['#000000', ' ? iams-ups ', 'yellow'],
     ])
     // Not repeated: Claude's summary, the turn's duration, the file counts, a second link.
@@ -335,8 +338,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     files.delete('/home/me/.claude/session-board/far.json')
     await clock.advance(5_000)
     const alone = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, isWorking: false } })
-    expect((await alone.find({ key: 'sb-strip' }))?.text.replace(/\s+/g, ' ').trim())
-      .toBe('current ✓ Done ⚑ CHECK mock order in jest.config.js ⚠ 1 to review ↓ ☰ All ›')
+    expect((await alone.find({ key: 'sb-strip' }))?.text.replace(/\s+/g, ' ').trim()).toBe('vault ✓ Done ☰ All ›')
+    expect((await alone.find({ key: 'sb-recap-row' }))?.text.replace(/\s+/g, ' ').trim()).toBe('⚑ CHECK mock order in jest.config.js ⚠ 1 to review ↓')
     await alone.unmount()
     // A narrow strip: icons only, and the check in full on a row of its own.
     const narrow = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, isWorking: false, bodyColumns: 40 } })
@@ -419,7 +422,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.tool.call({ tool: 'Edit', file_path: '/home/me/vault/a.md', old_string: 'x', new_string: 'y' })
     await clock.advance(5_000)
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: BAND })
-    expect((await band.find({ key: 'sb-live' }))?.text.replace(/\s+/g, ' ').trim()).toBe('▰▰▰▰▰▱▱▱▱▱ 1/2 Doing two')
+    expect((await band.find({ key: 'sb-live' }))?.text.replace(/\s+/g, ' ').trim()).toBe('↳ Editing a.md │ ▰▰▰▰▰▱▱▱▱▱ 1/2 Doing two')
     expect(await band.find({ key: 'sb-live-files' })).toBeUndefined()
     await band.unmount()
     const pane = await $.ui.mount({ plugin: 'session-board', surface, component: 'Pane', requestId: 'session-board', props: PANE_PROPS })
@@ -491,12 +494,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.agent.spawn({ prompt: 'find', description: 'Scan the vault', subagentType: 'Explore', background: true } as never)
     await $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
     await clock.advance(5_000)
-    expect(await strip()).toBe('current ◌ Waiting ◈ 1 agent ☰ All ›')
+    expect(await strip()).toBe('vault ◌ Waiting ◈ 1 agent ☰ All ›')
     // The status and the background count are chips on the labels' black (their colour is the text), and they touch.
     const band = await $.ui.mount({ plugin: 'session-board', surface, component: 'AbovePrompt', props: { ...BAND, isWorking: false } })
     const drawn = await band.find({ key: 'sb-strip' })
     expect(chipsOf(drawn)).toEqual([
-      ['#000000', ' current  ', '#8B949E'], ['#000000', ' ◌ Waiting ', 'magenta'], ['#000000', ' ◈ 1 agent ', 'magenta'],
+      ['#000000', ' vault    ', '#8B949E'], ['#000000', ' ◌ Waiting ', 'magenta'], ['#000000', ' ◈ 1 agent ', 'magenta'],
     ])
     expect(drawn?.text).toContain('Waiting  ◈ 1 agent')
     await band.unmount()
@@ -532,12 +535,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
       ],
     })
     await clock.advance(5_000)
-    expect(await strip()).toBe('current ◌ Waiting ◈ 1 job · 1 agent ☰ All ›')
+    expect(await strip()).toBe('vault ◌ Waiting ◈ 1 job · 1 agent ☰ All ›')
     // The agent ends: it leaves the count at once, and the shell left keeps the strip open (since 0.29.0: a lone job
     // opens it; before, it opened no strip).
     await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'Explore', stop_hook_active: false } as never)
     await clock.advance(5_000)
-    expect(await strip()).toBe('current ◌ Waiting ◈ 1 job ☰ All ›')
+    expect(await strip()).toBe('vault ◌ Waiting ◈ 1 job ☰ All ›')
   })
 
   test(`the ◈ chip counts jobs, agents, monitors and wake-ups apart; initials when narrow (${surface})`, async ($, on) => {
@@ -671,7 +674,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // A background shell mid-turn: the strip opens for it at once (0.28.0 counted only agents while a turn ran).
     await $.tool.call({ tool: 'Bash', command: 'python render.py', description: 'Render on the GPU', run_in_background: true })
     await clock.advance(5_000)
-    expect((await band($, BAND.bodyColumns, true)).strip).toBe('current ◔ Working ◈ 1 job ☰ All ›')
+    expect((await band($, BAND.bodyColumns, true)).strip).toBe('vault ◔ Working ◈ 1 job ☰ All ›')
     // Past a minute the wide chip gives the time in brackets beside the kind; the narrow one stays counts only ("1m"
     // there is a monitor).
     await clock.advance(12 * 60_000)
@@ -681,7 +684,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'Render on the GPU' }], session_crons: [] })
     await $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
     await clock.advance(5_000)
-    expect((await band($, BAND.bodyColumns, false)).strip).toBe('current ◌ Waiting ◈ 1 job (12m) ☰ All ›')
+    expect((await band($, BAND.bodyColumns, false)).strip).toBe('vault ◌ Waiting ◈ 1 job (12m) ☰ All ›')
     // Its report: off at once, and the strip closes.
     await $.prompt.submit({ text: report('b1'), origin: { kind: 'task-notification' }, wait: false })
     await clock.advance(5_000)
@@ -779,7 +782,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.advance(5_000)
     expect(card().tasks).toEqual(['monitor: Watch the render log'])
     // Kinds and starts survive too: the chip still counts a monitor, not a bare number.
-    expect((await band($, BAND.bodyColumns, false)).strip).toBe('current ◌ Waiting ◈ 1 monitor ☰ All ›')
+    expect((await band($, BAND.bodyColumns, false)).strip).toBe('vault ◌ Waiting ◈ 1 monitor ☰ All ›')
   })
 
   test(`journal on: log day folders past 30 days are removed, nothing else (${surface})`, { options: { journal: true } }, async ($, on) => {

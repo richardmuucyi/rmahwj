@@ -194,6 +194,8 @@ function parseCard(text: string): BoardEntry | undefined {
     // A background task's report is never "Asked": drop one saved by an older
     // version, so neither a reload nor another session's card brings it back.
     asked: typeof c.asked === 'string' && !/^<task-notification[\s>]/.test(c.asked.trim()) ? c.asked : '',
+    first: typeof c.first === 'string' && !/^<task-notification[\s>]/.test(c.first.trim()) ? c.first : undefined,
+    topic: typeof c.topic === 'string' && c.topic.trim() !== '' ? c.topic : undefined,
     tasks: Array.isArray(c.tasks) ? c.tasks.filter((x): x is string => typeof x === 'string') : undefined,
     bg: Array.isArray(c.bg)
       ? c.bg.filter(
@@ -472,7 +474,13 @@ async function adoptId($: EngineInterface, t: number): Promise<void> {
   resetLive($)
   sessionStartedAt = t
   pushLive($)
-  me = { ...me, v: CARD_VERSION, id, asked: '', status: 'open', activity: undefined, tasks: undefined, progress: undefined, bg: undefined, changedAt: t, seenAt: t }
+  // A /resume comes back to a conversation that already has a card: its requests and topic come back with it (Claude
+  // leaves the topic out while it stays the same, so nothing else would restore it). A /clear id has no card yet.
+  const prior = await $.fs
+    .read(`${dir}/${id}.json`)
+    .then(parseCard)
+    .catch(() => undefined)
+  me = { ...me, v: CARD_VERSION, id, asked: prior?.asked ?? '', first: prior?.first, topic: prior?.topic, status: 'open', activity: undefined, tasks: undefined, progress: undefined, bg: undefined, changedAt: t, seenAt: t }
   isDirty = true
 }
 
@@ -845,6 +853,8 @@ function pushLive($: EngineInterface): void {
   const bg = bgList()
   const fresh = {
     isWorking: isTurnRunning,
+    // What the main loop is doing now (from its own tool calls), for the now row while a turn runs.
+    doing: isTurnRunning ? mainActivity : undefined,
     model: ownModel,
     progress: p,
     showProgress: p !== null && (p.done < p.total || todoTouched),
@@ -994,7 +1004,8 @@ async function syncAgents($: EngineInterface): Promise<boolean> {
 const TURN_GUIDANCE = `## Turn summary
 When you used tools in a turn, end your final reply with one line in exactly this form:
 Turn: <what you did, under 15 words>
-If there is one thing the user should verify, add it to that line: "Turn: <what you did> · check: <what to verify, under 10 words>". Leave the line out of replies that used no tools.`
+If there is one thing the user should verify, add it to that line: "Turn: <what you did> · check: <what to verify, under 10 words>". Leave the line out of replies that used no tools.
+When the session's topic is new or has changed, add "· topic: <what this session is working on, 3 to 6 words>" to that line; leave it out while the topic stays the same.`
 
 /** With the journal on, Claude may add a lesson for the day page; with it off, the guidance stays as short as before. */
 const LESSON_GUIDANCE = `If the turn taught something worth keeping (a cause found, a trap, a better way), add it to the same line too: "· lesson: <under 15 words>". Most turns have no lesson.`
@@ -1020,17 +1031,17 @@ function toolKind(tool: string, args: Record<string, unknown>): ToolKind | undef
 }
 
 /** Claude's "Turn: … · check: … · lesson: …" line, the last one in its answer. Check and lesson come in either order. */
-function parseSummary(answer: string): { summary?: string; check?: string; lesson?: string } {
+function parseSummary(answer: string): { summary?: string; check?: string; lesson?: string; topic?: string } {
   const lines = answer.split('\n').map(l => l.trim()).filter(l => /^[*_]*turn[*_]*\s*:/i.test(l))
   const line = lines[lines.length - 1]
   if (!line) return {}
   const body = line.replace(/^[*_]*turn[*_]*\s*:[*_]*\s*/i, '').replace(/[*_]+$/, '').trim()
-  const [what, ...parts] = body.split(/\s*[·|•]\s*(?=(?:check|lesson)\s*:)/i)
-  const field = (name: 'check' | 'lesson') => {
+  const [what, ...parts] = body.split(/\s*[·|•]\s*(?=(?:check|lesson|topic)\s*:)/i)
+  const field = (name: 'check' | 'lesson' | 'topic') => {
     const p = parts.find(x => x.toLowerCase().startsWith(name))
     return p?.replace(/^\w+\s*:\s*/, '').replace(/[*_.]+$/, '').trim() || undefined
   }
-  return { summary: what?.trim() || undefined, check: field('check'), lesson: field('lesson') }
+  return { summary: what?.trim() || undefined, check: field('check'), lesson: field('lesson'), topic: field('topic') }
 }
 
 /** The running (or last) turn, refreshed from what the session tracks now. */
@@ -1970,7 +1981,7 @@ function recapStrip(r: TurnRecord, review: { open: number; high: number }, ui: K
   )
 }
 
-type Live = { isWorking: boolean; model?: string; progress: { done: number; total: number; now?: string } | null; showProgress: boolean; agents: AgentRow[]; turnFiles: number; bgRows?: BgRow[] }
+type Live = { isWorking: boolean; doing?: string; model?: string; progress: { done: number; total: number; now?: string } | null; showProgress: boolean; agents: AgentRow[]; turnFiles: number; bgRows?: BgRow[] }
 
 /** The strip's row for this session while it works: task bar, subagents, files changed. */
 function liveStrip($: EngineInterface, columns: number, l: Live, running: number, ui: Kit): RenderElement {
@@ -1982,6 +1993,13 @@ function liveStrip($: EngineInterface, columns: number, l: Live, running: number
     </Text>
   )
   let used = 0
+  // What the main loop is doing now, first: "↳ Editing git.ts".
+  if (l.doing) {
+    const doing = `↳ ${short(l.doing, Math.max(12, Math.floor(columns / 3)))}`
+    used += doing.length + 5
+    parts.push(<Text key="sb-live-doing">{doing}</Text>)
+    if (l.showProgress && l.progress) parts.push(sep('sb-live-s0'))
+  }
   if (l.showProgress && l.progress) {
     const [filled, empty] = barCells(l.progress.done, l.progress.total, 10)
     const count = ` ${l.progress.done}/${l.progress.total}`
@@ -2188,6 +2206,8 @@ export const register: Register = (on, options) => {
       folder: root,
       project: baseName(root),
       asked: prior?.asked ?? '',
+      ...(prior?.first ? { first: prior.first } : {}),
+      ...(prior?.topic ? { topic: prior.topic } : {}),
       status: 'open',
       activity: undefined,
       changedAt: at,
@@ -2312,13 +2332,23 @@ export const register: Register = (on, options) => {
         const byAge = (x: BoardEntry, y: BoardEntry) => x.changedAt - y.changedAt
         const needs = others.filter(c => c.status === 'needs-you').sort(byAge)
         const replied = others.filter(c => c.status === 'replied').sort(byAge)
-        // One entry per folder, oldest first: "iams-ups", "vault ×2".
+        // One entry per folder, oldest first: "iams-ups", "vault ×2". A session in this session's own folder would read
+        // the same as this one, so each gets its own entry, named by its first request ("vault · Fix the gcp merge"), else
+        // its latest (an older version writes no first), else the folder alone.
+        const ownKey = me ? folderKey(me.folder) : undefined
         const group = (list: BoardEntry[]) => {
           const groups = new Map<string, { name: string; n: number }>()
           for (const c of list) {
-            const key = folderKey(c.folder)
+            const label = folderLabel(c.folder, c.project, cards)
+            if (folderKey(c.folder) === ownKey) {
+              const request = c.topic || c.first || c.asked
+              groups.set(`id:${c.id}`, { name: request ? `${label} · ${short(request, 24)}` : label, n: 1 })
+              continue
+            }
+            // Another folder: one entry per folder and topic, "ops · deploy script", or "iams-ups ×2" with none.
+            const key = `${folderKey(c.folder)}|${c.topic ?? ''}`
             const g = groups.get(key)
-            groups.set(key, { name: folderLabel(c.folder, c.project, cards), n: (g?.n ?? 0) + 1 })
+            groups.set(key, { name: c.topic ? `${label} · ${short(c.topic, 24)}` : label, n: (g?.n ?? 0) + 1 })
           }
           return [...groups.values()]
         }
@@ -2376,10 +2406,12 @@ export const register: Register = (on, options) => {
       await guardPromptSent(guardIo($))
     }
     const previous = me?.asked
-    if (me && isYours && !isTaskReport && text !== '' && !text.startsWith('/')) me = { ...me, asked: short(text, 120) }
+    const previousFirst = me?.first
+    // "first" is this conversation's first request: set by the first prompt that sets "asked", never again until /clear.
+    if (me && isYours && !isTaskReport && text !== '' && !text.startsWith('/')) me = { ...me, asked: short(text, 120), first: me.first || short(text, 120) }
     if (isYours && !isTaskReport && text !== '') await update($, recapAtom, () => null)
     const result = await next(e)
-    if (me && 'drop' in result && result.drop !== undefined && previous !== undefined) me = { ...me, asked: previous }
+    if (me && 'drop' in result && result.drop !== undefined && previous !== undefined) me = { ...me, asked: previous, first: previousFirst }
     if (me && me.asked !== previous) {
       isDirty = true
       await flush($)
@@ -2494,6 +2526,7 @@ export const register: Register = (on, options) => {
     calls.set(key, { tool, agentId: loop, args, what, asking: isQuestion ? what : undefined, at: t })
     if (loop === undefined) mainActivity = what
     else if (isTurnRunning) mainActivity = `${what} (subagent)`
+    pushLive($)
     noteTurnTool(tool, args)
     const sub = loop === undefined ? undefined : agents.get(loop)
     if (sub) {
@@ -2634,6 +2667,14 @@ export const register: Register = (on, options) => {
     const cur = turnRecs[0]
     if (cur && cur.status === 'running') {
       const said = parseSummary(e.answer ?? '')
+      // A topic Claude named stays on the card until it names another: the strip and the other sessions show it.
+      if (me && said.topic) {
+        const topic = short(said.topic, 40)
+        if (topic !== me.topic) {
+          me = { ...me, topic }
+          isDirty = true
+        }
+      }
       turnRecs[0] = {
         ...cur,
         endedAt: t,
@@ -2726,7 +2767,7 @@ export const register: Register = (on, options) => {
     const l = await read($, liveAtom)
     const running = l.agents.filter(x => x.status === 'running').length
     // This session's own row: only while it works, and only with something to say.
-    const hasLive = l.isWorking && ((l.showProgress && l.progress !== null) || running > 0)
+    const hasLive = l.isWorking && (l.doing !== undefined || (l.showProgress && l.progress !== null) || running > 0)
     const q = a.quiet ?? { working: 0, waiting: 0, idle: 0 }
     const quietN = q.working + q.waiting + q.idle
     // Shown whenever another session is open: alerts as pills, the rest as dim counts.
@@ -2788,85 +2829,95 @@ export const register: Register = (on, options) => {
       </Text>
     )
     const named = (g: { name: string; n: number }) => (g.n > 1 ? `${g.name} ×${g.n}` : g.name)
+    // Line 1 by the strip's width: this session's folder, status and background work always; the other sessions only
+    // when one needs you or has replied (the quiet ones are counted in /sessions, not here), by name from 120 columns,
+    // as counts from 80, not at all below. What to check is line 2, at every width. Whatever the tier allows, line 1
+    // steps down until it fits on one line: names, counts, this session alone, its status as a glyph, its label cut
+    // to FIRST_COL. (A long folder name in same-folder pills, or a narrow split pane, would otherwise wrap it.)
+    const cols = e.props.bodyColumns
+    const tier: 'wide' | 'mid' | 'small' = cols >= 120 ? 'wide' : cols >= 80 ? 'mid' : 'small'
+    type Chip = { key: string; color: string; text: string }
     // At most three needs-you pills and two replied pills; the rest as a count.
     const needsShown = a.needs.slice(0, 3)
     const needsRest = a.needs.slice(3).reduce((sum, g) => sum + g.n, 0)
     const repliedTotal = a.replied.reduce((sum, g) => sum + g.n, 0)
-    const pills = [
-      ...needsShown.map((g, i) => statusChip(`sb-n-${i}`, 'yellow', `? ${named(g)}`)),
-      ...(needsRest > 0 ? [statusChip('sb-n-more', 'yellow', `? +${needsRest}`)] : []),
+    const needN = a.needs.reduce((n, g) => n + g.n, 0)
+    const pillChips: Chip[] = [
+      ...needsShown.map((g, i) => ({ key: `sb-n-${i}`, color: 'yellow', text: `? ${named(g)}` })),
+      ...(needsRest > 0 ? [{ key: 'sb-n-more', color: 'yellow', text: `? +${needsRest}` }] : []),
       ...(a.replied.length <= 2
-        ? a.replied.map((g, i) => statusChip(`sb-r-${i}`, 'green', `✓ ${named(g)}`))
-        : [statusChip('sb-r-all', 'green', `✓ ${repliedTotal} done`)]),
+        ? a.replied.map((g, i) => ({ key: `sb-r-${i}`, color: 'green', text: `✓ ${named(g)}` }))
+        : [{ key: 'sb-r-all', color: 'green', text: `✓ ${repliedTotal} done` }]),
     ]
-    // The quiet sessions: other live sessions that need nothing from you, counted by what they are doing. Each count is a
-    // chip in its status colour and glyph (the same as the status chips use), so nothing in the group is bare text.
-    const quietItems: RenderElement[] = []
-    if (q.working > 0) quietItems.push(statusChip('sb-q-working', COLOR.working, `${ICON.working}${q.working}`))
-    if (q.waiting > 0) quietItems.push(statusChip('sb-q-waiting', COLOR.background, `${ICON.background}${q.waiting}`))
-    if (q.idle > 0) quietItems.push(statusChip('sb-q-idle', COLOR.open, `${ICON.open}${q.idle}`))
-    // Every item of the group touches the next (no gaps), like the current group's pills do.
-    const groupItems = [...pills, ...quietItems]
-    const bgEl = bgN > 0 && statusChip('sb-bg', COLOR.background, bgChipText(l.bgKinds, bgN, false, oldest))
-    // A narrow terminal (a split pane): counts instead of folder names, so the row stays short instead of breaking
-    // into one-letter stripes. The same two label chips and the same "│" as the wide row, the status as its glyph only.
-    if (e.props.bodyColumns < 60) {
-      const needN = a.needs.reduce((n, g) => n + g.n, 0)
-      const doneN = a.replied.reduce((n, g) => n + g.n, 0)
-      const compact = (
-        <Box key="sb-strip" flexWrap="wrap">
-          {own !== null && labelChip('sb-current', 'current'.padEnd(FIRST_COL))}
-          {own !== null && statusChip('sb-self', COLOR[own.status as BoardStatus] ?? 'gray', `${ICON[own.status as BoardStatus] ?? ''}`)}
-          {bgN > 0 && statusChip('sb-bg', COLOR.background, bgChipText(l.bgKinds, bgN, true))}
-          {own !== null && hasOthers && <Text dimColor>{' │ '}</Text>}
-          {hasOthers && (
-            <Text key="sb-others">
-              {labelChip('sb-others-label', 'others')}
-              {needN > 0 && statusChip('sb-n-all', 'yellow', `?${needN}`)}
-              {doneN > 0 && statusChip('sb-r-all', 'green', `✓${doneN}`)}
-              {quietItems}
-            </Text>
-          )}
-          <Text>{'  '}</Text>
-          <Button key="sb-strip-open" plain onPress={() => $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })}>
-            <Text color={LINK}>☰ All ›</Text>
-          </Button>
-        </Box>
-      )
-      const beneath = await next(e)
+    const countChips: Chip[] = [
+      ...(needN > 0 ? [{ key: 'sb-n-all', color: 'yellow', text: `?${needN}` }] : []),
+      ...(repliedTotal > 0 ? [{ key: 'sb-r-all', color: 'green', text: `✓${repliedTotal}` }] : []),
+    ]
+    const alertsOut = needN > 0 || repliedTotal > 0
+    // The steps, fullest first; the tier says where to start.
+    type Step = { others: 'names' | 'counts' | 'none'; topicRoom: number; statusText: boolean; labelRoom: number }
+    const steps: Step[] = [
+      { others: 'names', topicRoom: 30, statusText: true, labelRoom: 24 },
+      // The other sessions' names (and their topics) before this session's full topic: shorten it first.
+      { others: 'names', topicRoom: 14, statusText: true, labelRoom: 24 },
+      { others: 'counts', topicRoom: 30, statusText: true, labelRoom: 24 },
+      { others: 'none', topicRoom: 30, statusText: true, labelRoom: 24 },
+      { others: 'none', topicRoom: 14, statusText: true, labelRoom: 24 },
+      { others: 'none', topicRoom: 0, statusText: true, labelRoom: 24 },
+      { others: 'none', topicRoom: 0, statusText: false, labelRoom: 24 },
+      { others: 'none', topicRoom: 0, statusText: false, labelRoom: FIRST_COL },
+    ]
+    // (`own` is the drawn status alone; the folder is on this session's card.)
+    // This session's topic, in Claude's words (its Turn line's "· topic: …"), beside the folder.
+    const topic = me?.topic
+    const topicText = (room: number) => (topic && room > 0 ? `› ${short(topic, room)}` : '')
+    // With a topic beside it the folder needs no padding: the topic chip follows it.
+    const folderText = (room: number, withTopic: boolean) => (withTopic ? short(me?.project || 'current', room) : short(me?.project || 'current', room).padEnd(FIRST_COL))
+    const selfColor = own !== null ? (COLOR[own.status as BoardStatus] ?? 'gray') : 'gray'
+    const selfText = (full: boolean) => (own === null ? '' : full ? `${ICON[own.status as BoardStatus] ?? ''} ${own.text}` : `${ICON[own.status as BoardStatus] ?? ''}`)
+    const bgText = (names: boolean) => (bgN > 0 ? bgChipText(l.bgKinds, bgN, !names, names ? oldest : undefined) : '')
+    const othersOf = (st: Step): Chip[] =>
+      !alertsOut || st.others === 'none' ? [] : st.others === 'names' ? [{ key: 'sb-others-label', color: '', text: 'others' }, ...pillChips] : countChips
+    // Terminal cells: CJK takes two (a folder can be named in Chinese); the strip's glyphs take one.
+    const cellsOf = (t: string) => [...t].reduce((n, ch) => n + (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1), 0)
+    const chipCells = (t: string) => cellsOf(t) + 2
+    const widthOf = (st: Step): number => {
+      const names = st.others === 'names'
+      const group = othersOf(st)
       return (
-        <Box flexDirection="column">
-          {compact}
-          {recapEl && <Box key="sb-recap-row" flexWrap="wrap">{recapEl}</Box>}
-          {liveRow}
-          {guardEl && guardOpensWithChip(g) && !recapEl && !liveRow && spacer}
-          {guardEl}
-          {!isBlank(beneath) && beneath}
-        </Box>
+        (own !== null ? chipCells(folderText(st.labelRoom, topicText(st.topicRoom) !== '')) + chipCells(selfText(st.statusText)) : 0) +
+        (own !== null && topicText(st.topicRoom) !== '' ? chipCells(topicText(st.topicRoom)) : 0) +
+        (bgN > 0 ? chipCells(bgText(names)) : 0) +
+        (group.length > 0 ? (own !== null ? 3 : 0) + group.reduce((n, c) => n + chipCells(c.text), 0) : 0) +
+        (names ? 3 + cellsOf('☰ All ›') : 2 + cellsOf('☰ ›'))
       )
     }
-    // One flowing row: the "current" chip with the session's status chip touching it, what to check (its flag
-    // touches the chip too), then a "│", the "others" chip with its status chips, then the link. The "│" is the first thing
-    // of the others group, so it moves with it when the row is full and the group starts a new row.
-    // Chips inside a group touch: the gap that is left is the one between the groups.
-    const lead = own !== null || recapEl !== null
+    const from = tier === 'wide' ? 0 : steps.findIndex(st => st.others === (tier === 'mid' ? 'counts' : 'none'))
+    const step = steps.slice(from).find(st => widthOf(st) <= cols) ?? steps[steps.length - 1]!
+    const names = step.others === 'names'
+    const group = othersOf(step)
+    const shownTopic = topicText(step.topicRoom)
+    const folderChip = own !== null && labelChip('sb-current', folderText(step.labelRoom, shownTopic !== ''))
+    const topicChip = own !== null && shownTopic !== '' && (
+      <Text key="sb-topic" backgroundColor={LABEL_BG}>
+        {` ${shownTopic} `}
+      </Text>
+    )
     const mine = (
       <Box key="sb-strip" flexWrap="wrap">
-        {own !== null && labelChip('sb-current', 'current'.padEnd(FIRST_COL))}
-        {own !== null && statusChip('sb-self', COLOR[own.status as BoardStatus] ?? 'gray', `${ICON[own.status as BoardStatus] ?? ''} ${own.text}`)}
-        {bgEl}
-        {recapEl}
-        {lead && hasOthers && <Text>{' '}</Text>}
-        {hasOthers && (
+        {folderChip}
+        {topicChip}
+        {own !== null && statusChip('sb-self', selfColor, selfText(step.statusText))}
+        {bgN > 0 && statusChip('sb-bg', COLOR.background, bgText(names))}
+        {group.length > 0 && (
           <Text key="sb-others">
-            {lead && <Text dimColor>{'│ '}</Text>}
-            {labelChip('sb-others-label', 'others')}
-            {groupItems}
+            {own !== null && <Text dimColor>{' │ '}</Text>}
+            {group.map(c => (c.color === '' ? labelChip(c.key, c.text) : statusChip(c.key, c.color, c.text)))}
           </Text>
         )}
-        <Text>   </Text>
+        <Text>{names ? '   ' : '  '}</Text>
         <Button key="sb-strip-open" plain onPress={() => $.ui.open({ id: PANE, title: 'Sessions', closeOnEscape: true })}>
-          <Text color={LINK}>☰ All ›</Text>
+          <Text color={LINK}>{names ? '☰ All ›' : '☰ ›'}</Text>
         </Button>
       </Box>
     )
@@ -2874,8 +2925,9 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {mine}
+        {recapEl && <Box key="sb-recap-row" flexWrap="wrap">{recapEl}</Box>}
         {liveRow}
-        {guardEl && guardOpensWithChip(g) && !liveRow && spacer}
+        {guardEl && guardOpensWithChip(g) && !recapEl && !liveRow && spacer}
         {guardEl}
         {!isBlank(beneath) && beneath}
       </Box>

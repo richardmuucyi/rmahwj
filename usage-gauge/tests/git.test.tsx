@@ -282,11 +282,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await gauge.row1()).toContain('release/2.0 ↓0')
   })
 
-  test(`a pane too narrow for a branch of 4 cells draws the slots without it (${surface})`, async ($, on) => {
+  test(`the branch takes the room the drawn row leaves: cut at 85 columns, whole from 92 (${surface})`, async ($, on) => {
+    // Narrow with the speed: the row drawn is 61 cells and the slots 8, so 85 columns leave 85 - 4 - 2 - 73 = 6 cells
+    // (4 for the footer's padding, 2 to spare).
+    // A row that leaves under 4 draws no branch: width.test.tsx draws one (the longest row at 85 columns).
     const gauge = await start($, on, surface, fakeRepo({ branch: 'feature/login' }))
     await gauge.pass(0)
-    expect(await gauge.row1(91)).toBe('opus-4-1 ● high ⏱ 1h 12m ⏳ 60m 90% $3.84 ⚡ 62 t/s ↓0 ±0 ↑0')
-    expect(await gauge.row1(92)).toBe('opus-4-1 ● high ⏱ 1h 12m ⏳ 60m 90% $3.84 ⚡ 62 t/s fea… ↓0 ±0 ↑0')
+    expect(await gauge.row1(85)).toBe('opus-4-1 ● high ⏱ 1h 12m ⏳ 60m 90% $3.84 ⚡ 62 t/s featu… ↓0 ±0 ↑0')
+    expect(await gauge.row1(92)).toBe('opus-4-1 ● high ⏱ 1h 12m ⏳ 60m 90% $3.84 ⚡ 62 t/s feature/login ↓0 ±0 ↑0')
   })
 
   // ── the fetch: how ↓ learns what the remote has ───────────────────────────

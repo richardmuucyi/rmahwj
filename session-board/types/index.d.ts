@@ -32,6 +32,11 @@ export type BoardEntry = {
   project: string
   /** Your latest prompt in that session, shortened. */
   asked: string
+  /** Your first prompt in this conversation, shortened: set once, cleared by /clear. Older versions write none. */
+  first?: string
+  /** What the session is working on, in Claude's words ("· topic: …" on its Turn line), kept until a new one; cleared by
+   *  /clear. Older versions write none. */
+  topic?: string
   status: BoardStatus
   /** What it is doing now, or what it needs from you. Facts from tool calls only. */
   activity?: string
@@ -106,6 +111,8 @@ export type TurnRecord = {
   check?: string
   /** What the turn taught ("· lesson: …"), for the day journal; asked for only with the journal setting on. */
   lesson?: string
+  /** The session's topic, when this turn named a new one ("· topic: …"). */
+  topic?: string
   files: { added: number; modified: number; deleted: number; renamed: number; top: FileRow[] }
   tools: Partial<Record<ToolKind, number>>
   toolTotal: number
@@ -188,6 +195,8 @@ declare module 'claude-code' {
       /** This session's live detail: model, task progress, subagents, files changed this turn. */
       live: {
         isWorking: boolean
+        /** What the main loop is doing now, while a turn runs: the now row. */
+        doing?: string
         model?: string
         progress: { done: number; total: number; now?: string } | null
         /** Whether the bar is worth showing: items left, or the list changed this turn. */

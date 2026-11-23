@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, SessionContextBreakdown } from 'claude-code'
 
-import type { Gauge, Git, Limit } from '../types'
-import { clip, layoutOf, parseStatus, showOf, slotsOf } from './git'
+import type { Folder, Gauge, Git, Limit } from '../types'
+import { BRANCH_MAX, FLEX_MAX, FOLDER_MAX, cellWidth, clipCells, colorOf, fitFolder, folderOf, layoutOf, parseStatus, roomOf, showOf, slotsOf, splitRoom, textOf } from './git'
 import type { Show } from './git'
 
 // Reads the session's own usage figures, the model each request names and the
@@ -17,6 +17,8 @@ const gauge = atom({ plugin: 'usage-gauge', key: 'gauge' } as const, {
 })
 
 const REFRESH_MS = 15_000
+/** The spaces between row-1 items; the room the git chip and the folder get is measured with it. */
+const GAP_CELLS = 3
 
 /** What the person chose to show (the manifest's userConfig); `register` sets it from its options. */
 let show: Show = showOf({})
@@ -328,6 +330,25 @@ async function fetchGit($: EngineInterface): Promise<void> {
   }
 }
 
+/**
+ * Where the session runs, against its root, into the gauge. Only on the main loop: a subagent's cwd() is its own folder
+ * (a worktree), so a hook on its call never reads. The value is written only when it changed, so an idle session is not
+ * redrawn. A refused call keeps the last folder.
+ */
+async function readFolder($: EngineInterface): Promise<void> {
+  if (!show.folder) return
+  try {
+    const [root, cwd] = await Promise.all([$.session.root(), $.session.cwd()])
+    const next: Folder = folderOf(root, cwd)
+    const same = (f: Folder | undefined) => f?.place === next.place && f.root === next.root && f.here === next.here
+    // An update that hands back the same value is still a write, and every write redraws: look first.
+    if (same((await read($, gauge)).folder)) return
+    await update($, gauge, g => (same(g.folder) ? g : { ...g, folder: next }))
+  } catch {
+    // keep the last folder
+  }
+}
+
 /** The status now, and a fetch when one is due. Never awaited by a turn: the fetch can take as long as the network does. */
 async function refreshGit($: EngineInterface): Promise<void> {
   if (!show.git || gitBusy) return
@@ -428,11 +449,16 @@ function clockChip(ui: Kit, g: Gauge, now: number, withTime: boolean, withCache:
  * clean repository is three dim zeros, never a missing chip. The colours are the theme's: warning for news on the
  * remote, error for a branch that has diverged or a file in conflict (slotsOf has the rules).
  */
-function gitChip(ui: Kit, git: Git, withUntracked: boolean, branchRoom: number): RenderElement {
+function gitChip(ui: Kit, git: Git, withUntracked: boolean, branchRoom: number, folder?: FolderPart): RenderElement {
   const { Text } = ui
   const parts: RenderElement[] = []
   // The branch is the one piece of the chip that gives: cut short with … to the room the pane leaves, or left out.
-  const branch = branchRoom > 0 ? clip(git.branch, branchRoom) : ''
+  const branch = branchRoom > 0 ? clipCells(git.branch, branchRoom) : ''
+  // The session's folder starts the chip, in its own colour, with a dim ":" when a branch follows it.
+  if (folder && folder.text !== '') {
+    parts.push(folderText(ui, 'ug-git-folder', folder))
+    parts.push(branch !== '' ? <Text key="ug-git-fs" dimColor>{':'}</Text> : <Text key="ug-git-fs">{' '}</Text>)
+  }
   if (branch !== '') {
     parts.push(<Text key="ug-git-branch">{branch}</Text>)
     parts.push(<Text key="ug-git-b">{' '}</Text>)
@@ -446,6 +472,18 @@ function gitChip(ui: Kit, git: Git, withUntracked: boolean, branchRoom: number):
     )
   })
   return <Text key="ug-git">{parts}</Text>
+}
+
+/** The folder part as drawn: its text, already cut to its room, and its colour (none at the root). */
+type FolderPart = { text: string; color?: 'warning' | 'error' }
+
+function folderText(ui: Kit, key: string, f: FolderPart): RenderElement {
+  const { Text } = ui
+  return (
+    <Text key={key} {...(f.color ? { color: f.color } : {})}>
+      {f.text}
+    </Text>
+  )
 }
 
 function meter(ui: Kit, key: string, label: string, l: Limit | undefined, reset: string | undefined): RenderElement {
@@ -479,12 +517,21 @@ export const register: Register = (on, options) => {
     filled = undefined
     await refresh($).catch(() => undefined)
     void refreshGit($)
+    void readFolder($)
     $.clock.every(REFRESH_MS, () => {
       void refresh($).catch(() => undefined)
       void refreshGit($)
+      void readFolder($)
     })
     return next(e)
   })
+
+  // Before each main-loop tool call: a `cd` in the call before has moved the session by now, and a read after this call
+  // would still see the old folder. Never in the call's way.
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId === undefined) void readFolder($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // The main loop's model and effort, and how fast its reply came out.
   on('turn.step', async function* ($, e, next) {
@@ -580,6 +627,7 @@ export const register: Register = (on, options) => {
       if (!e.isAborted) await update($, gauge, g => ({ ...g, noPlan: g.fiveHour === undefined && g.weekly === undefined })).catch(() => undefined)
       // The turn may have written files or committed: look again, without making the turn wait for git.
       void refreshGit($)
+      void readFolder($)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -603,7 +651,7 @@ export const register: Register = (on, options) => {
     // `show.git` is checked here as well as in refreshGit: the gauge's state outlives the reload that a change in /config
     // causes, so a repository read by the module before it can still be in it.
     const slots = show.git && g.git !== undefined
-    const { narrow: isNarrow, speed: withSpeed, untracked: withUntracked, branch: branchRoom } = layoutOf(e.viewport?.columns, slots)
+    const { narrow: isNarrow, speed: withSpeed, untracked: withUntracked } = layoutOf(e.viewport?.columns, slots)
     const t = g.now || g.startedAt
     // The person picked again since the last request (/model, /effort): the new pick, in the plain colours, until a
     // request is held to it.
@@ -635,7 +683,7 @@ export const register: Register = (on, options) => {
         )}
       </Box>
     )
-    const gap = (k: string) => <Text key={k}>{'   '}</Text>
+    const gap = (k: string) => <Text key={k}>{' '.repeat(GAP_CELLS)}</Text>
     // Row 1 is the items the person chose and the pane has room for, three spaces apart: a missing one leaves no hole.
     const items: RenderElement[] = []
     if (chip) items.push(chip)
@@ -643,7 +691,33 @@ export const register: Register = (on, options) => {
     if (clock) items.push(clock)
     if (show.cost && g.ran && g.cost !== undefined) items.push(<Text key="ug-cost" bold>{`$${g.cost.toFixed(2)}`}</Text>)
     if (show.speed && withSpeed && g.ran && g.tps !== undefined) items.push(<Text key="ug-tps">{`⚡ ${g.tps} t/s`}</Text>)
-    if (slots && g.git) items.push(gitChip(ui, g.git, withUntracked, branchRoom))
+    // The session's folder: at the start of the git chip, sharing the chip's room with the branch (the branch keeps its
+    // room at the root, the folder keeps its room once the session has moved), or as its own item where there is no chip.
+    const folder = show.folder ? g.folder : undefined
+    // The room is what the row DRAWN so far leaves, not what the longest possible row would: the items' own text in
+    // cells, three spaces between them (roomOf keeps 2 to spare).
+    const columns = e.viewport?.columns
+    const drawnSoFar = items.reduce((n, item, i) => n + cellWidth(textOf(item)) + (i > 0 ? GAP_CELLS : 0), 0)
+    const before = drawnSoFar + (items.length > 0 ? GAP_CELLS : 0)
+    if (slots && g.git) {
+      // After the flexible part: one space, then the slots as they will be drawn.
+      const slotCells = cellWidth(slotsOf(g.git, withUntracked).map(s => s.text).join(' '))
+      const flexRoom = roomOf(columns, before + 1 + slotCells, FLEX_MAX)
+      const branchRoom = roomOf(columns, before + 1 + slotCells, BRANCH_MAX)
+      if (folder) {
+        const drift = folder.place !== 'root'
+        // Both wants in cells. The folder may take what the branch leaves of FLEX_MAX, so a short branch leaves room for
+        // the whole "personal-notes›mods"; the row's longest is still FLEX_MAX.
+        const branchWant = Math.min(BRANCH_MAX, cellWidth(g.git.branch))
+        const want = Math.min(FLEX_MAX - 1 - branchWant, cellWidth(fitFolder(folder, Number.MAX_SAFE_INTEGER)))
+        const room = splitRoom(flexRoom, want, branchWant, drift)
+        const color = colorOf(folder)
+        items.push(gitChip(ui, g.git, withUntracked, room.branch, { text: fitFolder(folder, room.folder), ...(color ? { color } : {}) }))
+      } else items.push(gitChip(ui, g.git, withUntracked, branchRoom))
+    } else if (folder) {
+      const text = fitFolder(folder, roomOf(columns, before, FOLDER_MAX))
+      if (text !== '') items.push(folderText(ui, 'ug-folder', { text, ...(colorOf(folder) ? { color: colorOf(folder) } : {}) }))
+    }
     const row1 = (
       <Box key="ug-row1" flexWrap="wrap">
         {items.flatMap((item, i) => (i === 0 ? [item] : [gap(`ug-g${i}`), item]))}

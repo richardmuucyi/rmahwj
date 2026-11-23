@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { BRANCH_MAX, BRANCH_MIN, NARROW_BELOW, SPEED_FROM, cap, clip, layoutOf, parseStatus, showOf, slotsOf } from '../hooks/git'
+import { NARROW_BELOW, SPEED_FROM, cap, clip, layoutOf, parseStatus, showOf, slotsOf } from '../hooks/git'
 import type { Git } from '../types'
 
 // The parts of the git slots that need no engine: what `git status --porcelain=v2 --branch` says as counts, the counts
@@ -119,7 +119,7 @@ test('slots: warning for news on the remote, error for a diverged branch or a co
 })
 
 test('options: every item is on unless the person turned it off', () => {
-  const ON = { time: true, cost: true, speed: true, git: true, cache: true, fetch: true }
+  const ON = { time: true, cost: true, speed: true, git: true, cache: true, fetch: true, folder: true }
   expect(showOf({})).toEqual(ON)
   expect(showOf({ showTime: true, showGit: true })).toEqual(ON)
   expect(showOf({ showTime: false })).toEqual({ ...ON, time: false })
@@ -128,6 +128,7 @@ test('options: every item is on unless the person turned it off', () => {
   expect(showOf({ showGit: false })).toEqual({ ...ON, git: false })
   expect(showOf({ showCache: false })).toEqual({ ...ON, cache: false })
   expect(showOf({ fetchRemote: false })).toEqual({ ...ON, fetch: false })
+  expect(showOf({ showFolder: false })).toEqual({ ...ON, folder: false })
 })
 
 test('layout: without the git chip every threshold is the gauge\'s old one', () => {
@@ -145,21 +146,5 @@ test('layout: with the git chip the speed waits for 85 columns, and the untracke
   expect(layoutOf(115, true)).toMatchObject({ narrow: false, speed: true, untracked: true })
 })
 
-test('layout: the branch takes what is left, 2 cells to spare, from 4 to 16 cells; an unmeasured pane gets all 16', () => {
-  expect([BRANCH_MIN, BRANCH_MAX]).toEqual([4, 16])
-  // narrow without the speed: the row without the branch is 72 cells at most
-  expect(layoutOf(80, true).branch).toBe(5)
-  expect(layoutOf(84, true).branch).toBe(9)
-  // narrow with the speed: 85, so the branch starts again at none where it comes in
-  expect(layoutOf(85, true).branch).toBe(0)
-  expect(layoutOf(91, true).branch).toBe(0)
-  expect(layoutOf(92, true).branch).toBe(4)
-  expect(layoutOf(104, true).branch).toBe(16)
-  expect(layoutOf(114, true).branch).toBe(16)
-  // wide: 106
-  expect(layoutOf(115, true).branch).toBe(6)
-  expect(layoutOf(124, true).branch).toBe(15)
-  expect(layoutOf(125, true).branch).toBe(16)
-  expect(layoutOf(undefined, true)).toEqual({ narrow: false, speed: true, untracked: true, branch: 16 })
-  expect(layoutOf(0, true)).toEqual({ narrow: false, speed: true, untracked: true, branch: 16 })
-})
+// The rooms of the folder and the branch are measured on the drawn row since 0.13.1: roomOf in folder.test.ts, the
+// drawn widths in width.test.tsx.

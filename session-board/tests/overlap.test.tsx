@@ -11,7 +11,7 @@ const BAND = {
   hasSurvey: false,
   isWorking: false,
   maxRows: 10,
-  bodyColumns: 100,
+  bodyColumns: 130,
   scroll: { offset: 0, bodyRows: 10 },
   view: {},
 }
@@ -131,8 +131,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
-    expect(await strip($, surface, 50)).toBe('current ✓ │ others ◔1 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
+    expect(await strip($, surface, 50)).toBe('vault ✓ Done ☰ ›')
     expect(await filesTab($, surface, true)).toContain('~ notes.md also: vault +1 −1 ■■■■■ ▸')
   })
 
@@ -163,7 +163,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.advance(5_000)
     const runs = gitStatusRuns(repo)
     await clock.advance(60_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
     expect(gitStatusRuns(repo)).toBe(runs)
     expect(hasAlso(await filesTab($, surface, true))).toBe(false)
   })
@@ -182,7 +182,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
       await edit($, [NOTES])
       await clock.advance(5_000)
-      expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
+      expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
       const t = await filesTab($, surface, true)
       expect(t).toContain('~ notes.md +1 −1 ■■■■■ ▸')
       expect(hasAlso(t)).toBe(false)
@@ -237,7 +237,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [far])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
     expect((await filesTab($, surface, true)).some(x => /plan\.md also: vault/.test(x))).toBe(true)
   })
 
@@ -249,7 +249,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
     expect((await filesTab($, surface, true)).some(x => /notes\.md also: vault/.test(x))).toBe(true)
   })
 
@@ -263,8 +263,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES, todo])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔2 ☰ All ›')
-    expect(await strip($, surface, 50)).toBe('current ✓ │ others ◔2 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
+    expect(await strip($, surface, 50)).toBe('vault ✓ Done ☰ ›')
     const t = await filesTab($, surface, true)
     expect(t).toContain('~ notes.md also: iams-ups, vault +1 −1 ■■■■■ ▸')
     expect(t).toContain('~ todo.md also: iams-ups +1 −1 ■■■■■ ▸')
@@ -281,7 +281,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await edit($, [NOTES])
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔4 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
     expect(await filesTab($, surface, true)).toContain('~ notes.md also: blog, iams-ups, vault ×2 +1 −1 ■■■■■ ▸')
   })
 
@@ -369,7 +369,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.advance(5_000)
     await $.session.start({ cwd: '/home/me/vault', surface, isInteractive: true })
     await clock.advance(5_000)
-    expect(await strip($, surface)).toBe('current ✓ Done │ others ◔1 ☰ All ›')
+    expect(await strip($, surface)).toBe('vault ✓ Done ☰ All ›')
     const card = JSON.parse(files.get(`${DIR}/me.json`) ?? '{}') as { edits?: string[] }
     expect(card.edits).toEqual([NOTES])
   })
